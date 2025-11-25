@@ -1,5 +1,3 @@
-// 파일: android/app/build.gradle.kts
-
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -14,8 +12,8 @@ if (localPropertiesFile.exists()) {
         localProperties.load(inputStream)
     }
 }
-// local.properties 파일에서 "MAP_API_KEY" 값을 읽어옵니다. (수정됨)
-val mapApiKey: String? = localProperties.getProperty("MAP_API_KEY")
+// 💡 [수정] local.properties 파일에서 "google.mapsApiKey" 값을 읽어오도록 변경합니다.
+val mapApiKey: String? = localProperties.getProperty("google.mapsApiKey")
 
 // ---------------------------------------------------------------------
 
@@ -51,7 +49,7 @@ android {
         versionName = flutter.versionName
 
         // 💡 2. Manifest Placeholders 설정 (읽어온 API 키 값을 Manifest에 주입)
-        // 키가 null이면 빈 문자열을 사용하도록 처리합니다.
+        // Manifest가 요구하는 "MAP_API_KEY" 변수에, local.properties에서 읽어온 실제 키를 주입합니다.
         manifestPlaceholders["MAP_API_KEY"] = mapApiKey ?: ""
     }
 
@@ -70,8 +68,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.10.0")
 
-    // 💡 Google Maps SDK 종속성 (Google Maps로 전환 시 필요)
+    // 💡 Google Maps SDK 종속성 (버전 최신화 권장: 18.2.0 유지)
     implementation("com.google.android.gms:play-services-maps:18.2.0")
 }
-
-
