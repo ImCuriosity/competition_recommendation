@@ -1,0 +1,20 @@
+# 가상환경
+venv/
+.venv/
+env/
+
+# 환경변수 (민감한 정보)
+.env
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VS Code 설정
+.vscode/
+
+# 기타
+*.log
+.DS_Store
