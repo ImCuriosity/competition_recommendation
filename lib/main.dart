@@ -6,10 +6,14 @@ import 'dart:convert';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:sports_app1/login_screen.dart';
 
 // ----------------------------------------------------
 // 대회 데이터 모델
 // ----------------------------------------------------
+
+//우리 1등임
+
 
 class Competition {
   final String id;
@@ -174,7 +178,7 @@ class MyApp extends StatelessWidget {
           foregroundColor: Colors.white,
         ),
       ),
-      home: const CompetitionMapScreen(),
+      home: const LoginScreen(),
     );
   }
 }
