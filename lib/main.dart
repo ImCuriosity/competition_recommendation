@@ -12,6 +12,9 @@ import 'package:sports_app1/login_screen.dart';
 // 대회 데이터 모델
 // ----------------------------------------------------
 
+//우리 1등임
+
+
 class Competition {
   final String id;
   final String name;
