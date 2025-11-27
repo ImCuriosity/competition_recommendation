@@ -7,13 +7,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:sports_app1/login_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 
 // ----------------------------------------------------
 // 대회 데이터 모델
 // ----------------------------------------------------
-
-//우리 1등임
-
 
 class Competition {
   final String id;
@@ -35,20 +34,15 @@ class Competition {
   });
 
   factory Competition.fromJson(Map<String, dynamic> json) {
-    // 💡 Null 안전성 강화: 'as' 캐스팅 대신 안전한 접근 및 기본값 제공
-    // Null이 String으로 캐스팅되는 오류를 방지합니다.
 
-    // id는 null이 아니라고 가정하고 toString() 사용
     final String competitionId = json['id']?.toString() ?? 'unknown_id';
 
-    // 필수 필드에 Null이 들어왔을 경우 대체 값 지정
     final String competitionName = (json['name'] as String?) ?? '제목 없음';
     final String competitionCategory = (json['sport_category'] as String?) ?? '기타';
     final String competitionLocation = (json['location_city_county'] as String?) ?? '지역 정보 없음';
     final String competitionStartDate = (json['start_date'] as String?) ?? '미정';
     final String competitionRegisterUrl = (json['register_url'] as String?) ?? '';
 
-    // 좌표는 필수이며, Null일 경우 기본값 (0.0) 할당
     final double lat = (json['latitude'] as double?) ?? 0.0;
     final double lng = (json['longitude'] as double?) ?? 0.0;
 
@@ -70,13 +64,10 @@ class Competition {
 // 상수 및 초기 설정
 // ----------------------------------------------------
 
-// 백엔드 API 기본 URL (FastAPI의 기본 포트를 8000에서 8080으로 변경했습니다.)
 const String kBaseUrl = "http://10.0.2.2:8080";
 
-// 드롭다운 선택지 (백엔드와 일치하도록 설정)
 const List<String> kSportCategories = ['전체 종목', '배드민턴', '마라톤', '보디빌딩', '테니스'];
 
-// 1단계: 시/도 단위 선택지
 const List<String> kProvinces = [
   '전체 지역',
   '서울특별시',
@@ -98,8 +89,8 @@ const List<String> kProvinces = [
   '제주특별자치도'
 ];
 
-// 2단계: 시/도에 따른 시/군/구 매핑 데이터
 const Map<String, List<String>> kCityCountyMap = {
+  // ... (기존 지역 데이터 유지) ...
   '전체 지역': ['전체 시/군/구'],
   // 1. 특별시
   '서울특별시': ['전체 시/군/구', '종로구', '중구', '용산구', '성동구', '광진구', '동대문구', '중랑구', '성북구', '강북구', '도봉구', '노원구', '은평구', '서대문구', '마포구', '양천구', '강서구', '구로구', '금천구', '영등포구', '동작구', '관악구', '서초구', '강남구', '송파구', '강동구'],
@@ -132,7 +123,6 @@ const Map<String, List<String>> kCityCountyMap = {
   '제주특별자치도': ['전체 시/군/구', '제주시', '서귀포시']
 };
 
-// 초기 지도 중심점 (Google Maps의 LatLng으로 교체)
 const LatLng kInitialCameraPosition = LatLng(37.5665, 126.9780); // 서울 시청
 
 
@@ -141,19 +131,38 @@ const LatLng kInitialCameraPosition = LatLng(37.5665, 126.9780); // 서울 시�
 // ----------------------------------------------------
 
 void main() async {
+  // 💡 Flutter 엔진이 위젯과 플랫폼 채널을 사용할 수 있도록 보장합니다. (항상 첫 줄에 위치)
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 💡 .env 파일 로드
+  // 1. .env 파일 로드
   try {
     await dotenv.load(fileName: ".env");
   } catch (e) {
     print("⚠️ .env 파일 로드 실패: $e");
   }
 
-  // 💡 .env에서 클라이언트 ID 가져오기
+  // 2. Supabase 초기화 (로그인/회원가입 기능 사용을 위한 필수 단계)
+  final String? supabaseUrl = dotenv.env['SUPABASE_URL'];
+  final String? supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
+
+  if (supabaseUrl != null && supabaseAnonKey != null) {
+    try {
+      await Supabase.initialize(
+        url: supabaseUrl,
+        anonKey: supabaseAnonKey,
+      );
+      print("✅ Supabase 클라이언트 초기화 성공!");
+    } catch (e) {
+      print("⚠️ Supabase 클라이언트 초기화 실패: $e");
+    }
+  } else {
+    print("⚠️ SUPABASE_URL 또는 SUPABASE_ANON_KEY가 .env 파일에 설정되지 않았습니다. 인증 기능이 작동하지 않을 수 있습니다.");
+  }
+
+
+  // 💡 .env에서 클라이언트 ID 가져오기 (Google Maps용)
   final String? clientId = dotenv.env['GOOGLE_MAPS_API_KEY'];
 
-  // 지도 SDK 초기화 - Google Maps는 네이티브 파일에서 초기화하므로 Dart 코드는 간소화합니다.
   if (clientId != null && clientId.isNotEmpty) {
     print("Google Maps API 키 로드 완료. (네이티브 파일에서 키 확인 필요)");
   } else {
@@ -186,7 +195,6 @@ class MyApp extends StatelessWidget {
 // ----------------------------------------------------
 // 메인 화면 위젯 (지도 및 검색 기능)
 // ----------------------------------------------------
-
 class CompetitionMapScreen extends StatefulWidget {
   const CompetitionMapScreen({super.key});
 
@@ -221,6 +229,37 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
     _fetchCompetitions(isInitial: true);
   }
 
+  // ✅ Supabase 로그아웃 처리 (오류 수정: .client 추가)
+  Future<void> _logout() async {
+    setState(() {
+      _isLoading = true;
+    });
+    try {
+      // 💡 Supabase.instance.client.auth.signOut()로 수정
+      await Supabase.instance.client.auth.signOut();
+      // 로그아웃 성공 시 LoginScreen으로 이동
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+              (Route<dynamic> route) => false,
+        );
+      }
+      _showSnackBar('로그아웃되었습니다.');
+    } catch (e) {
+      _showSnackBar('로그아웃 중 오류가 발생했습니다: $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  // ✅ 프로필 수정 (임시 Placeholder)
+  void _editProfile() {
+    _showSnackBar('프로필 수정 화면으로 이동합니다. (기능 구현 예정)');
+    // 여기에 Navigator.push 등을 사용하여 프로필 수정 페이지로 이동하는 로직을 추가할 수 있습니다.
+  }
+
   // ✅ 현재 위치를 가져오는 함수
   Future<void> _determinePosition() async {
     bool serviceEnabled;
@@ -237,7 +276,6 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
         _showSnackBar('위치 권한이 거부되었습니다.');
-        return;
       }
     }
 
@@ -317,7 +355,7 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
             _adjustMapBounds();
           });
 
-          // 💡 [수정] 검색 결과 개수를 표시하는 스낵바 추가
+          // 💡 검색 결과 개수를 표시하는 스낵바 추가
           if (resultCount > 0) {
             _showSnackBar("✅ 검색 결과: ${resultCount}개의 대회가 발견되었습니다.");
           } else {
@@ -504,9 +542,36 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 💡 현재 사용자 ID 가져오기 (오류 수정: .client 추가)
+    final String? currentUserId = Supabase.instance.client.auth.currentUser?.id;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🏆 체육 대회 검색'),
+        // 💡 앱 타이틀과 사용자 ID를 함께 표시 (ID는 작게)
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('🏆 체육 대회 검색', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            if (currentUserId != null)
+              Text('ID: $currentUserId', style: const TextStyle(fontSize: 10, color: Colors.white70)),
+          ],
+        ),
+
+        // 💡 우측 상단 액션 버튼들: 프로필 수정 및 로그아웃
+        actions: [
+          // 1. 프로필 수정 버튼
+          IconButton(
+            icon: const Icon(Icons.person),
+            tooltip: '프로필 수정',
+            onPressed: _isLoading ? null : _editProfile,
+          ),
+          // 2. 로그아웃 버튼
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: '로그아웃',
+            onPressed: _isLoading ? null : _logout,
+          ),
+        ],
       ),
       body: Stack(
         children: [
