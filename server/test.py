@@ -32,7 +32,7 @@ load_dotenv()
 app = FastAPI(
     title="Sports Competition API (Pagination Fix)",
     description="운동 대회 검색 API (Supabase 1000개 제한 해제를 위한 페이지네이션 적용)",
-    version="1.0.5" # 버전 업데이트
+    version="1.0.6" # 버전 업데이트
 )
 
 # Supabase 클라이언트 초기화 (조건부)
@@ -76,9 +76,6 @@ async def fetch_all_competitions_paginated(base_query: Any) -> List[Dict[str, An
             # 다음 페이지로 이동
             offset += SUPABASE_PAGE_SIZE
             
-            # 💡 참고: 비동기 환경에서 과부하 방지를 위해 짧은 대기 시간을 줄 수 있으나, 
-            # 여기서는 성능을 위해 생략합니다. (필요 시 asyncio.sleep(0.1) 등을 추가할 수 있습니다.)
-
         except Exception as e:
             print(f"❌ 페이지네이션 중 오류 발생 (Offset: {offset}): {e}")
             break # 오류 발생 시 루프 종료
@@ -97,10 +94,9 @@ def process_competition_data(item: Dict[str, Any], available_from: Optional[str]
             start_date_str = period_str.split(',')[0].replace('[', '').strip()
             
             if start_date_str < available_from:
-                return None # 필터링 조건 불충족
+                return None # 필터링 조건 불충족 (시작 날짜가 선택일보다 이전)
         except Exception as e:
-            # 날짜 파싱 실패해도 일단 포함 (경고 로깅)
-            # print(f"⚠️ 날짜 파싱 실패 (ID: {item.get('id')}): {e}") # 데이터가 너무 많아 로그 제거
+            # 날짜 파싱 실패해도 일단 포함
             pass
 
     # 2. WKB 파싱 및 위도/경도 추출
@@ -111,7 +107,6 @@ def process_competition_data(item: Dict[str, Any], available_from: Optional[str]
             item['longitude'] = geom.x
             item['latitude'] = geom.y
         except Exception as e:
-            # print(f"⚠️ 좌표 파싱 실패 (ID: {item.get('id')}): {e}") # 데이터가 너무 많아 로그 제거
             item['longitude'] = None
             item['latitude'] = None
             
@@ -138,7 +133,7 @@ def read_root():
     """헬스체크 엔드포인트"""
     return {
         "message": "Sports Competition API is running!",
-        "version": "1.0.5",
+        "version": "1.0.6",
         "supabase_connected": supabase is not None
     }
 
@@ -155,7 +150,7 @@ async def test_all_data():
         )
     
     try:
-        # 💡 수정: 페이지네이션 함수를 사용하여 모든 데이터를 가져옵니다.
+        # 페이지네이션 함수를 사용하여 모든 데이터를 가져옵니다.
         base_query = supabase.table("competitions").select("*")
         all_data = await fetch_all_competitions_paginated(base_query)
         
@@ -227,27 +222,27 @@ async def search_competitions(
     query_sport_category = sport_category.value if sport_category else None
     
     try:
-        # 1. 기본 쿼리 빌드 (필터 적용)
+        # 1. 기본 쿼리 빌드
         base_query = supabase.table("competitions").select("*")
         
+        # 1-1. 종목 필터 적용
         if query_sport_category:
             base_query = base_query.eq("sport_category", query_sport_category)
         
-        # 지역 필터링 로직 (기존 유지)
+        # 1-2. 🚀 최종 수정된 지역 필터링 로직 (DB 컬럼: location_province_city, location_county_district 사용)
         if province and province != '전체 지역':
-            location_filter_term = province
+            
+            # 시/도 필터: location_province_city 컬럼과 정확히 일치 (EQ)
+            base_query = base_query.eq("location_province_city", province)
             
             if city_county and city_county != '전체 시/군/구':
-                # 정확히 일치하는 시/군/구 검색
-                base_query = base_query.eq("location_city_county", f"{province} {city_county}")
-            else:
-                # 시/도만 검색 (ilike 사용)
-                base_query = base_query.ilike("location_city_county", f"{location_filter_term}%")
+                # 시/군/구 필터: location_county_district 컬럼과 정확히 일치 (EQ)
+                base_query = base_query.eq("location_county_district", city_county)
                 
-        # 2. 💡 수정: 페이지네이션을 사용하여 필터링된 모든 데이터를 가져옵니다.
+        # 2. 페이지네이션을 사용하여 필터링된 모든 데이터를 가져옵니다.
         all_fetched_data = await fetch_all_competitions_paginated(base_query)
         
-        # 3. WKB 파싱해서 위도/경도 추출 + 날짜 필터링을 유틸리티 함수로 처리 (클라이언트 측 필터)
+        # 3. WKB 파싱 및 날짜 필터링 (클라이언트 측 필터)
         processed_data: List[Dict[str, Any]] = []
         for item in all_fetched_data:
             processed_item = process_competition_data(item, available_from)
@@ -292,7 +287,7 @@ def health_check():
         "supabase_connected": supabase is not None,
         "supabase_url_configured": bool(supabase_url),
         "supabase_key_configured": bool(supabase_key),
-        "api_version": "1.0.5"
+        "api_version": "1.0.6"
     }
 
 if __name__ == "__main__":
