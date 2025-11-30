@@ -2,27 +2,42 @@ from fastapi import FastAPI, Query, HTTPException
 from dotenv import load_dotenv
 import os
 from typing import Optional, Dict, Any
+import json
+from enum import Enum
+from supabase import create_client, Client
+from shapely import wkb
+from binascii import unhexlify
+
+# ====================================================
+# 상수 및 초기 설정
+# ====================================================
+
+# 허용되는 스포츠 종목을 Enum으로 정의하여 유효성 검사 강화
+# 💡 수정: Enum Key와 Value를 모두 한글로 통일했습니다. (DB 쿼리도 한글 사용)
+class SportCategory(str, Enum):
+    배드민턴 = "배드민턴"
+    마라톤 = "마라톤"
+    보디빌딩 = "보디빌딩"
+    테니스 = "테니스"
 
 # 환경변수 로드
 load_dotenv()
 
 # FastAPI 앱 생성
 app = FastAPI(
-    title="Sports Competition API",
-    description="운동 대회 검색 API",
-    version="1.0.0"
+    title="Sports Competition API (지역 검색 유연화)",
+    description="운동 대회 검색 API (한글 종목명 통일 및 유연한 지역 검색)",
+    version="1.0.3" # 버전 업데이트
 )
 
 # Supabase 클라이언트 초기화 (조건부)
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
-supabase = None
+supabase: Optional[Client] = None
 
-# Supabase 설정이 있을 때만 연결
 if supabase_url and supabase_key and supabase_url != "your-supabase-url":
     try:
-        from supabase import create_client, Client
-        supabase: Client = create_client(supabase_url, supabase_key)
+        supabase = create_client(supabase_url, supabase_key)
         print("✅ Supabase 연결 성공!")
     except Exception as e:
         print(f"⚠️ Supabase 연결 실패: {e}")
@@ -35,108 +50,14 @@ def read_root():
     """헬스체크 엔드포인트"""
     return {
         "message": "Sports Competition API is running!",
-        "version": "1.0.0",
+        "version": "1.0.3",
         "supabase_connected": supabase is not None
     }
 
 
-@app.get("/competitions", response_model=Dict[str, Any])
-async def search_competitions(
-    sport_category: Optional[str] = Query(
-        None, 
-        description="운동 종목",
-        examples=["배드민턴"]
-    ),
-    location_city_county: Optional[str] = Query(
-        None, 
-        description="지역 (시/구)",
-        examples=["서울특별시 강남구"]
-    ),
-    available_from: Optional[str] = Query(
-        None, 
-        description="참가 가능 시작 날짜 (YYYY-MM-DD) - 이 날짜 이후에 시작하는 대회만 표시",
-        examples=["2024-03-01"]
-    )
-):
-    """
-    사용자가 선택한 조건에 맞는 대회 검색
-    
-    - **sport_category**: 배드민턴, 마라톤, 보디빌딩, 테니스
-    - **location_city_county**: 서울특별시 강남구, 경기도 수원시 등
-    - **available_from**: 이 날짜 이후에 시작하는 대회만 검색
-    """
-    # Supabase 연결 확인
-    print("sport_category:",sport_category)
-    print("location_city_county:",location_city_county)
-    print("available_from:",available_from)
-    if not supabase:
-        return {
-            "success": False,
-            "message": "Supabase가 연결되지 않았습니다.",
-            "note": "나중에 .env 파일에 SUPABASE_URL과 SUPABASE_KEY를 설정하세요.",
-            "filters": {
-                "sport_category": sport_category,
-                "location_city_county": location_city_county,
-                "available_from": available_from
-            }
-        }
-    
-    try:
-        # RPC 함수 호출 방식
-        response = supabase.rpc(
-                "search_competitions",
-                {
-                    # ⬇️ Supabase Stored Procedure의 정의 순서에 맞게 키-값 쌍을 배치합니다. ⬇️
-
-                    # 1. 종목 (p_sport_category)
-                    "p_sport_category": sport_category, 
-                    
-                    # 2. 지역 (p_location_city_county)
-                    "p_location_city_county": location_city_county, 
-                    
-                    # 3. 날짜 (p_available_from)
-                    "p_available_from": available_from
-                }
-            ).execute()
-        
-        return {
-            "success": True,
-            "count": len(response.data),
-            "filters": {
-                "sport_category": sport_category,
-                "location_city_county": location_city_county,
-                "available_from": available_from
-            },
-            "data": response.data
-        }
-        
-    except Exception as e:
-        # 💡 로그를 콘솔에 추가 출력하여 디버깅을 돕습니다.
-        print(f"--- Supabase RPC Error ---")
-        print(f"Filter: {sport_category}, {location_city_county}, {available_from}")
-        print(f"Error: {str(e)}")
-        print(f"--------------------------")
-        
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error": str(e), # Supabase에서 온 오류 메시지
-                "message": "대회 검색 중 오류가 발생했습니다."
-            }
-        )
-
-
-@app.get("/competitions/simple", response_model=Dict[str, Any])
-async def search_competitions_simple(
-    sport_category: Optional[str] = Query(None),
-    location_city_county: Optional[str] = Query(None)
-):
-    """
-    간단한 검색 (기간 필터 없이)
-    종목과 지역만으로 검색
-    """
-    # Supabase 연결 확인
+# 테스트용: 모든 데이터 확인 엔드포인트는 그대로 유지합니다.
+@app.get("/test/all-data")
+async def test_all_data():
     if not supabase:
         return {
             "success": False,
@@ -144,32 +65,160 @@ async def search_competitions_simple(
         }
     
     try:
-        # Supabase 쿼리 시작
-        query = supabase.table("competitions").select("*")
+        response = supabase.table("competitions").select("*").execute()
         
-        # 종목 필터
-        if sport_category:
-            query = query.eq("sport_category", sport_category)
+        print("\n" + "="*70)
+        print(f"📊 전체 대회 데이터: {len(response.data)}개")
+        print("="*70)
         
-        # 지역 필터
-        if location_city_county:
-            query = query.eq("location_city_county", location_city_county)
-        
-        # 쿼리 실행
-        response = query.execute()
+        # 데이터가 너무 많으면 출력하지 않거나 일부만 출력
+        if response.data and len(response.data) < 10:
+             for idx, competition in enumerate(response.data, 1):
+                 print(f"\n[{idx}번째 대회]")
+                 print(json.dumps(competition, indent=2, ensure_ascii=False))
+                 print("-" * 70)
         
         return {
             "success": True,
-            "count": len(response.data),
+            "total_count": len(response.data),
             "data": response.data
         }
         
     except Exception as e:
+        print(f"\n❌ 에러: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# 메인 검색 엔드포인트 (종목 쿼리 로직 수정됨)
+@app.get("/competitions", response_model=Dict[str, Any])
+async def search_competitions(
+    sport_category: Optional[SportCategory] = Query(
+        None, 
+        description="운동 종목 (배드민턴, 마라톤, 보디빌딩, 테니스 중 하나)",
+        # 💡 예시를 한글 종목명으로 업데이트
+        examples=[SportCategory.배드민턴.value] 
+    ),
+    province: Optional[str] = Query(
+        None, 
+        description="시/도 이름 (예: 경기도, 서울특별시)",
+        examples=["서울특별시"]
+    ),
+    city_county: Optional[str] = Query(
+        None, 
+        description="시/군/구 이름 (예: 강남구, 수원시)",
+        examples=["강남구"]
+    ),
+    available_from: Optional[str] = Query(
+        None, 
+        description="참가 가능 시작 날짜 (YYYY-MM-DD)",
+        examples=["2025-11-01"]
+    )
+):
+    """
+    사용자가 선택한 조건에 맞는 대회 검색 (종목, 지역, 기간) - 지역 검색 유연성 확보
+    """
+    print("sport_category:", sport_category)
+    print("province:", province)
+    print("city_county:", city_county)
+    print("available_from:", available_from)
+    
+    if not supabase:
+        raise HTTPException(
+            status_code=503,
+            detail={"success": False, "message": "Supabase가 연결되지 않았습니다."}
+        )
+    
+    query_sport_category = None
+    if sport_category:
+        # 💡 수정: Enum key 대신 .value (한글 종목명)를 쿼리에 사용합니다.
+        # 참고: SportCategory는 이제 key도 한글이므로 .name이나 .value나 동일합니다.
+        query_sport_category = sport_category.value
+        
+    try:
+        query = supabase.table("competitions").select("*")
+        
+        if query_sport_category:
+            # 💡 수정: 한글 종목명을 그대로 DB 필드 'sport_category'에 대해 `eq`로 필터링합니다.
+            query = query.eq("sport_category", query_sport_category)
+        
+        # 지역 필터링 로직 (변경 없음)
+        if province and province != '전체 지역':
+            location_filter_term = province
+            
+            if city_county and city_county != '전체 시/군/구':
+                location_filter_term = f"{province} {city_county}"
+                query = query.eq("location_city_county", location_filter_term)
+            else:
+                query = query.ilike("location_city_county", f"{location_filter_term}%")
+                
+        
+        response = query.execute()
+        
+        # WKB 파싱해서 위도/경도 추출 + 날짜 필터링
+        processed_data = []
+        for item in response.data:
+            # 날짜 필터링 (변경 없음)
+            if available_from and item.get('event_period'):
+                try:
+                    period_str = item['event_period']
+                    start_date_str = period_str.split(',')[0].replace('[', '').strip()
+                    
+                    if start_date_str < available_from:
+                        continue
+                except Exception as e:
+                    print(f"⚠️ 날짜 파싱 실패 (ID: {item.get('id')}): {e}")
+            
+            # WKB 16진수 문자열을 파싱
+            if item.get('location'):
+                try:
+                    geom = wkb.loads(unhexlify(item['location']))
+                    item['longitude'] = geom.x
+                    item['latitude'] = geom.y
+                    # event_period가 있을 때만 start_date를 파싱
+                    item['start_date'] = item.pop('event_period', '').split(',')[0].replace('[', '').strip()
+                except Exception as e:
+                    print(f"⚠️ 좌표 파싱 실패 (ID: {item.get('id')}): {e}")
+                    item['longitude'] = None
+                    item['latitude'] = None
+                    # 좌표 파싱 실패해도 event_period는 처리
+                    item['start_date'] = item.pop('event_period', '').split(',')[0].replace('[', '').strip()
+            else:
+                # location 필드가 없는 경우 처리
+                item['longitude'] = None
+                item['latitude'] = None
+                item['start_date'] = item.pop('event_period', '').split(',')[0].replace('[', '').strip()
+
+            # WKB 바이너리 제거
+            item.pop('location', None)
+            
+            processed_data.append(item)
+        
+        print(f"\n🔍 API 요청: 종목={sport_category.value if sport_category else '전체'}, 시/도={province}, 시/군/구={city_county}, 기간={available_from}")
+        print(f"✅ 검색 결과: {len(processed_data)}개")
+        
+        return {
+            "success": True,
+            "count": len(processed_data),
+            "filters": {
+                "sport_category": sport_category.value if sport_category else None,
+                "province": province,
+                "city_county": city_county,
+                "available_from": available_from
+            },
+            "data": processed_data
+        }
+        
+    except Exception as e:
+        print(f"❌ 에러: {str(e)}\n")
         raise HTTPException(
             status_code=500,
             detail={
                 "success": False,
-                "error": str(e)
+                "error": str(e),
+                "message": "대회 검색 중 오류가 발생했습니다."
             }
         )
 
@@ -183,3 +232,8 @@ def health_check():
         "supabase_url_configured": bool(supabase_url),
         "supabase_key_configured": bool(supabase_key)
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    # 안드로이드 에뮬레이터 접근을 위해 host를 0.0.0.0으로 설정
+    uvicorn.run(app, host="0.0.0.0", port=8080, reload=True)
