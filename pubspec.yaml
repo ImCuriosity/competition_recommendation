@@ -50,6 +50,9 @@ dependencies:
   google_maps_flutter: ^2.14.0
   geolocator: ^14.0.2
 
+  # supabase 패키지 추가
+  supabase_flutter: ^2.5.0  # 최신 버전
+
 
 
 
