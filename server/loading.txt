@@ -1,2 +1,2 @@
 python test.py
-uvicorn test:app --reload
+uvicorn test:app --reload --port 8080
