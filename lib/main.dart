@@ -19,15 +19,12 @@ class Competition {
   final String name;
   final LatLng latLng;
   final String category;
-  final String location;
+  final String location; // location_province_city + location_county_district
+  final String locationName; // location_name (대회 장소)
   final String startDate; // 대회 시작일
   final String registerUrl;
   final String registrationStartDate;
   final String registerDeadline;
-  final String gender;
-  final String ageGroup;
-  final String educationLevel;
-
 
   Competition({
     required this.id,
@@ -35,36 +32,63 @@ class Competition {
     required this.latLng,
     required this.category,
     required this.location,
+    required this.locationName,
     required this.startDate,
     required this.registerUrl,
     required this.registrationStartDate,
     required this.registerDeadline,
-    required this.gender,
-    required this.ageGroup,
-    required this.educationLevel,
 
   });
 
   factory Competition.fromJson(Map<String, dynamic> json) {
 
+    // 기본 정보
     final String competitionId = json['id']?.toString() ?? 'unknown_id';
-
-    final String competitionName = (json['name'] as String?) ?? '제목 없음';
+    final String competitionName = (json['title'] as String?) ?? '제목 없음';
     final String competitionCategory = (json['sport_category'] as String?) ?? '기타';
-    final String competitionLocation = (json['location_city_county'] as String?) ?? '지역 정보 없음';
     final String competitionStartDate = (json['start_date'] as String?) ?? '미정';
-    final String competitionRegisterUrl = (json['register_url'] as String?) ?? '';
+    final String competitionRegisterUrl = (json['homepage_url'] as String?) ?? '';
+    final String competitionLocationName = (json['location_name'] as String?) ?? '장소 정보 없음';
 
-    final String competitionRegistrationStartDate = (json['registration_start_date'] as String?) ?? '미정';
-    final String competitionRegisterDeadline = (json['register_deadline'] as String?) ?? '미정';
-    final String competitionGender = (json['gender'] as String?) ?? '전체'; // 성별
-    final String competitionAgeGroup = (json['age_group'] as String?) ?? '전체'; // 연령
-    final String competitionEducationLevel = (json['education_level'] as String?) ?? '제한 없음'; // 학력
+    // 💡 지역 정보 결합
+    final String provinceCity = (json['location_province_city'] as String?) ?? '';
+    final String countyDistrict = (json['location_county_district'] as String?) ?? '';
+    final String competitionLocation = '$provinceCity $countyDistrict'.trim();
 
+    // 접수 기간 및 마감일
+    String registrationPeriodString = (json['registration_period'] as String?) ?? '미정';
+    String registrationStartDate = '미정';
+    String registerDeadline = '미정';
 
+    if (registrationPeriodString != '미정' && registrationPeriodString.contains(',')) {
+      // "[2025-10-30,2025-11-13)" 에서 날짜 문자열 추출
+      try {
+        final parts = registrationPeriodString
+            .replaceAll('[', '')
+            .replaceAll(')', '')
+            .split(',');
+
+        if (parts.length == 2) {
+          final startStr = parts[0].trim();
+          final endStr = parts[1].trim();
+
+          // 접수 시작일
+          registrationStartDate = startStr;
+
+          // 접수 마감일 = 끝나는 날짜 (배제) - 1 day
+          final DateTime endDate = DateTime.parse(endStr);
+          final DateTime deadlineDate = endDate.subtract(const Duration(days: 1));
+          registerDeadline = DateFormat('yyyy-MM-dd').format(deadlineDate);
+        }
+      } catch (e) {
+        // 날짜 파싱 오류 발생 시 기본값 유지
+        print("Registration period parsing error: $e");
+      }
+    }
+
+    // 위도 경도
     final double lat = (json['latitude'] as double?) ?? 0.0;
     final double lng = (json['longitude'] as double?) ?? 0.0;
-
     final LatLng competitionLatLng = LatLng(lat, lng);
 
     return Competition(
@@ -73,13 +97,11 @@ class Competition {
       latLng: competitionLatLng,
       category: competitionCategory,
       location: competitionLocation,
+      locationName: competitionLocationName,
       startDate: competitionStartDate,
       registerUrl: competitionRegisterUrl,
-      registrationStartDate: competitionRegistrationStartDate,  // 접수 시작일
-      registerDeadline: competitionRegisterDeadline, // 접수 마감일
-      gender: competitionGender,
-      ageGroup: competitionAgeGroup,
-      educationLevel: competitionEducationLevel,
+      registrationStartDate: registrationStartDate,  // 접수 시작일
+      registerDeadline: registerDeadline, // 접수 마감일
 
 
     );
@@ -490,12 +512,6 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                 Text('접수 마감일: ${competition.registerDeadline}'),
                 Text('대회 시작일: ${competition.startDate}'),
 
-                const Divider(height: 20), // 구분선
-
-                // 💡 참가 자격 정보
-                Text('성별, ${competition.gender}'),
-                Text('나이, ${competition.ageGroup}'),
-                Text('학력, ${competition.educationLevel}'),
 
                 const SizedBox(height: 20),
                 Row(
