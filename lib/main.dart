@@ -20,8 +20,14 @@ class Competition {
   final LatLng latLng;
   final String category;
   final String location;
-  final String startDate;
+  final String startDate; // 대회 시작일
   final String registerUrl;
+  final String registrationStartDate;
+  final String registerDeadline;
+  final String gender;
+  final String ageGroup;
+  final String educationLevel;
+
 
   Competition({
     required this.id,
@@ -31,6 +37,12 @@ class Competition {
     required this.location,
     required this.startDate,
     required this.registerUrl,
+    required this.registrationStartDate,
+    required this.registerDeadline,
+    required this.gender,
+    required this.ageGroup,
+    required this.educationLevel,
+
   });
 
   factory Competition.fromJson(Map<String, dynamic> json) {
@@ -42,6 +54,13 @@ class Competition {
     final String competitionLocation = (json['location_city_county'] as String?) ?? '지역 정보 없음';
     final String competitionStartDate = (json['start_date'] as String?) ?? '미정';
     final String competitionRegisterUrl = (json['register_url'] as String?) ?? '';
+
+    final String competitionRegistrationStartDate = (json['registration_start_date'] as String?) ?? '미정';
+    final String competitionRegisterDeadline = (json['register_deadline'] as String?) ?? '미정';
+    final String competitionGender = (json['gender'] as String?) ?? '전체'; // 성별
+    final String competitionAgeGroup = (json['age_group'] as String?) ?? '전체'; // 연령
+    final String competitionEducationLevel = (json['education_level'] as String?) ?? '제한 없음'; // 학력
+
 
     final double lat = (json['latitude'] as double?) ?? 0.0;
     final double lng = (json['longitude'] as double?) ?? 0.0;
@@ -56,6 +75,13 @@ class Competition {
       location: competitionLocation,
       startDate: competitionStartDate,
       registerUrl: competitionRegisterUrl,
+      registrationStartDate: competitionRegistrationStartDate,  // 접수 시작일
+      registerDeadline: competitionRegisterDeadline, // 접수 마감일
+      gender: competitionGender,
+      ageGroup: competitionAgeGroup,
+      educationLevel: competitionEducationLevel,
+
+
     );
   }
 }
@@ -392,11 +418,13 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
       final marker = Marker(
         markerId: MarkerId(comp.id),
         position: comp.latLng,
-        infoWindow: InfoWindow(
-          title: comp.name,
-          snippet: comp.location,
-          onTap: () => _showCompetitionDetails(comp),
-        ),
+        // infoWindow: InfoWindow(
+        //   title: comp.name,
+        //   snippet: comp.location,
+        // ),
+        onTap: () {
+          _showCompetitionDetails(comp);
+        },
       );
       newMarkers.add(marker);
     }
@@ -454,7 +482,21 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                 const SizedBox(height: 10),
                 Text('종목: ${competition.category}'),
                 Text('지역: ${competition.location}'),
-                Text('시작일: ${competition.startDate}'),
+
+                const Divider(height: 20), // 구분선
+
+                // 💡 접수 및 대회 기간 정보
+                Text('접수 시작일: ${competition.registrationStartDate}'),
+                Text('접수 마감일: ${competition.registerDeadline}'),
+                Text('대회 시작일: ${competition.startDate}'),
+
+                const Divider(height: 20), // 구분선
+
+                // 💡 참가 자격 정보
+                Text('성별, ${competition.gender}'),
+                Text('나이, ${competition.ageGroup}'),
+                Text('학력, ${competition.educationLevel}'),
+
                 const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
