@@ -1,22 +1,29 @@
 from fastapi import FastAPI, Query, HTTPException
 from dotenv import load_dotenv
 import os
-from typing import Optional, Dict, Any, List
-import json
+from typing import Optional, Dict, Any, List, Tuple
 from enum import Enum
 from supabase import create_client, Client
 from supabase.lib.client_options import ClientOptions
 from shapely import wkb
 from binascii import unhexlify
-import asyncio
-import datetime # datetime 모듈 유지
+import datetime
+import math
 
 # ====================================================
 # 상수 및 초기 설정
 # ====================================================
 
-# Supabase REST API의 기본 최대 제한(LIMIT)은 1000개입니다. 
 SUPABASE_PAGE_SIZE = 1000 
+EARTH_RADIUS_KM = 6371.0 # 지구 반지름 (킬로미터)
+
+# 유사도 계산을 위한 상수
+MAX_DIST_KM = 500.0 # 위치 유사도 정규화를 위한 최대 거리
+SKILL_WEIGHT = 0.6 # 실력 유사도 가중치
+LOCATION_WEIGHT = 0.4 # 위치 유사도 가중치
+
+# 실력 랭크 매핑 (유사도 계산용)
+SKILL_RANK = {"상": 3, "중": 2, "하": 1, "무관": 0}
 
 # 허용되는 스포츠 종목을 Enum으로 정의
 class SportCategory(str, Enum):
@@ -25,14 +32,59 @@ class SportCategory(str, Enum):
     보디빌딩 = "보디빌딩"
     테니스 = "테니스"
 
+# ★★★ 최종 업데이트된 GRADE_SKILL_MAP (모든 4개 종목 반영) ★★★
+GRADE_SKILL_MAP: Dict[SportCategory, Dict[str, List[str]]] = {
+    SportCategory.테니스: {
+        "상": [
+            "챌린저부", "마스터스부", "지도자부", "개나리부", "국화부", 
+            "통합부", "마스터스", "챌린저"
+        ],
+        "중": [
+            "전국신인부", "남자오픈부", "여자퓨처스부", "남자퓨처스부", "세미오픈부", 
+            "베테랑부", "오픈부", "신인부", "썸머부", "무궁화부", "랭킹부", "퓨처스부"
+        ],
+        "하": [
+            "남자테린이부", "여자테린이부", "지역 신인부", "입문부", "테린이", 
+            "초심부", "루키부", "신인"
+        ],
+        "무관": ["무관", "", "전부"],
+    },
+    SportCategory.보디빌딩: {
+        "상": ["마스터즈", "시니어", "오픈", "프로", "엘리트", "오버롤", "마스터"],
+        "중": ["주니어", "미들", "일반부", "학생부"],
+        "하": ["루키", "노비스", "비기너", "초심"],
+        "무관": ["무관", ""],
+    },
+    SportCategory.배드민턴: {
+        "상": ["S급", "A급", "B급", "S조", "A조", "B조", "자강"],
+        "중": ["C급", "D급", "C조", "D조"],
+        "하": ["E급", "초심", "왕초", "신인", "F급", "E조"],
+        "무관": ["무관", ""],
+    },
+    SportCategory.마라톤: {
+        "상": [
+            "풀", "하프", "42.195km", "21.0975km", "100km", "50km", "48km", "40km", 
+            "35km", "32km", "32.195km", "25km", "16km", "15km", "Full", "Half", "마니아"
+        ],
+        "중": [
+            "13km", "12km", "11.19km", "10km", "7.5km", "7km", "10k"
+        ],
+        "하": [
+            "5km", "3km", "5km 걷기", "7인1조 단체전", "5k", "3k", "걷기"
+        ],
+        "무관": ["무관", "", "전부"],
+    },
+}
+# ★★★ 최종 등급 업데이트 반영 끝 ★★★
+
 # 환경변수 로드
 load_dotenv()
 
 # FastAPI 앱 생성
 app = FastAPI(
-    title="Sports Competition API (AI Recommendation)",
-    description="운동 대회 검색 및 AI 추천 API (Sysdate 고정 적용)",
-    version="1.1.2" # 버전 업데이트
+    title="Sports Competition API (Similarity Recommendation)",
+    description="운동 대회 검색 및 임베딩/유사도 기반 AI 추천 API",
+    version="2.0.4" # 보디빌딩 매핑 최종 업데이트
 )
 
 # Supabase 클라이언트 초기화 (조건부)
@@ -54,16 +106,13 @@ else:
 # ====================================================
 
 async def fetch_all_competitions_paginated(base_query: Any) -> List[Dict[str, Any]]:
-    """
-    Supabase의 1000개 제한을 우회하기 위해 페이지네이션을 사용하여 모든 데이터를 가져옵니다.
-    """
+    """페이지네이션을 사용하여 모든 데이터를 가져옵니다."""
     all_data = []
     offset = 0
     
     while True:
         try:
             response = base_query.range(offset, offset + SUPABASE_PAGE_SIZE - 1).execute()
-            
             current_data = response.data
             all_data.extend(current_data)
             
@@ -82,23 +131,21 @@ async def fetch_all_competitions_paginated(base_query: Any) -> List[Dict[str, An
 def process_competition_data(item: Dict[str, Any], available_from: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """WKB 파싱 및 날짜 필터링/처리 로직"""
     
-    # 1. 날짜 필터링
-    # available_from이 None이 아닌 경우에만 필터링을 수행합니다.
+    # 1. 날짜 필터링 (선행 필터)
     if available_from and item.get('event_period'):
         try:
-            # event_period가 "[YYYY-MM-DD, YYYY-MM-DD]" 형태라고 가정
             period_str = item['event_period']
             start_date_str = period_str.split(',')[0].replace('[', '').strip()
             
-            # 대회 시작일이 기준일(available_from)보다 이전이면 필터링
             if start_date_str < available_from:
                 return None 
         except Exception:
-            pass # 날짜 파싱 오류 발생 시 필터링하지 않고 다음 단계로 진행
+            pass
 
     # 2. WKB 파싱 및 위도/경도 추출
     if item.get('location'):
         try:
+            # WKB 16진수 문자열 파싱
             geom = wkb.loads(unhexlify(item['location']))
             item['longitude'] = geom.x
             item['latitude'] = geom.y
@@ -110,63 +157,44 @@ def process_competition_data(item: Dict[str, Any], available_from: Optional[str]
         item['longitude'] = None
         item['latitude'] = None
 
-    # 3. 'start_date' 필드 정리 및 'location' 제거
+    # 3. 데이터 정리
     if item.get('event_period'):
         item['start_date'] = item.pop('event_period', '').split(',')[0].replace('[', '').strip()
     else:
         item['start_date'] = None
         
-    item.pop('location', None) # WKB 바이너리 제거
+    item.pop('location', None)
     
     return item
 
 # ====================================================
-# AI 추천 로직 유틸리티 함수 (중략 - 로직 변경 없음)
+# AI 추천: 선행 필터링 유틸리티 함수
 # ====================================================
 
-# 1. 등급(Grade)을 사용자 실력(Skill: 상/중/하)에 매핑하는 기준 정의
-GRADE_SKILL_MAP: Dict[SportCategory, Dict[str, List[str]]] = {
-    SportCategory.테니스: {
-        "상": ["개나리부", "국화부", "통합부", "지도자부", "마스터스부", "챌린저부"],
-        "중": ["오픈부", "신인부", "썸머부", "무궁화부", "랭킹부", "남자퓨처스부", "여자퓨처스부"],
-        "하": ["입문부", "테린이", "초심부", "루키부"],
-        "무관": ["무관", "", "전부"],
-    },
-    SportCategory.보디빌딩: {
-        "상": ["프로", "마스터", "시니어", "엘리트", "오버롤"],
-        "중": ["일반부", "주니어", "학생부", "미들", "시니어"],
-        "하": ["비기너", "초심", "루키", "노비스"],
-        "무관": ["무관", ""],
-    },
-    SportCategory.배드민턴: {
-        "상": ["S급", "A급", "B급", "S조", "A조", "B조"],
-        "중": ["C급", "D급", "C조", "D조"],
-        "하": ["E급", "초심", "F급", "E조"],
-        "무관": ["무관", ""],
-    },
-    SportCategory.마라톤: {
-        "상": ["풀코스", "42.195km", "하프코스", "21km", "Half"],
-        "중": ["10km", "하프", "12km", "15km", "10k"],
-        "하": ["5km", "건강 달리기", "워킹", "3km", "5k"],
-        "무관": ["무관", ""],
-    },
-}
-
-def get_skill_level_from_grade(sport: SportCategory, grade: Optional[str]) -> Optional[str]:
-    """대회 등급(grade)을 사용자 실력 레벨(상/중/하)로 변환"""
+def get_skill_level_from_grade(sport: str, grade: Optional[str]) -> str:
+    """대회 등급(grade)을 사용자 실력 레벨(상/중/하/무관)로 변환"""
     grade = grade.strip().replace(' ', '') if grade else ""
     if not grade:
         return "무관"
 
-    mapping = GRADE_SKILL_MAP.get(sport, {})
+    try:
+        sport_enum = SportCategory(sport)
+    except ValueError:
+        return "무관"
+
+    mapping = GRADE_SKILL_MAP.get(sport_enum, {})
+    # 등급 매핑 시, 대소문자 구분 없이, 그리고 공백 없이 비교하도록 처리
+    normalized_grade = grade.upper().replace(' ', '')
+    
     for skill_level, grades in mapping.items():
-        if grade in grades:
+        if normalized_grade in [g.upper().replace(' ', '') for g in grades]:
             return skill_level
     
-    return None
+    return "무관"
+
 
 def age_matches(user_age: int, competition_age_str: Optional[str]) -> bool:
-    """사용자 나이가 대회 참가 연령 기준에 맞는지 확인 (한국식 나이 기준)"""
+    """사용자 나이가 대회 참가 연령 기준에 맞는지 확인 (선행 필터)"""
     if not competition_age_str or competition_age_str == "무관":
         return True
 
@@ -190,14 +218,12 @@ def age_matches(user_age: int, competition_age_str: Optional[str]) -> bool:
             max_age = int(max_str)
             return min_age <= user_age < max_age
             
-    except ValueError:
-        return False
     except Exception:
         return False
 
 
 def gender_matches(user_gender: Optional[str], competition_gender: Optional[str]) -> bool:
-    """사용자 성별이 대회 성별 제한에 맞는지 확인"""
+    """사용자 성별이 대회 성별 제한에 맞는지 확인 (선행 필터)"""
     if not competition_gender or competition_gender == "무관":
         return True
 
@@ -207,82 +233,154 @@ def gender_matches(user_gender: Optional[str], competition_gender: Optional[str]
     if not user_gender:
         return False
     
-    if comp_gender == "남" and user_gender == "남":
-        return True
-    
-    if comp_gender == "여" and user_gender == "여":
+    # 성별이 일치하는 경우만 허용
+    if comp_gender == user_gender:
         return True
         
     return False
 
 # ====================================================
-# DB 인터페이스 (Profiles 및 Interesting_Sports)
+# AI 추천: 유사도 계산 유틸리티 함수
+# ====================================================
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """두 위도/경도 좌표 간의 거리를 킬로미터(km)로 계산합니다 (Haversine 공식)."""
+    
+    # 각도를 라디안으로 변환
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    
+    # Haversine 공식 적용
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    distance_km = EARTH_RADIUS_KM * c
+    return distance_km
+
+def calculate_location_similarity(user_lat: float, user_lon: float, comp_lat: float, comp_lon: float) -> float:
+    """위치 유사도 점수를 계산합니다 (0 ~ 1.0). 거리가 가까울수록 1에 가깝습니다."""
+    
+    distance = haversine_distance(user_lat, user_lon, comp_lat, comp_lon)
+    
+    # 500km를 최대 기준으로 정규화 (0~1)
+    normalized_distance = min(distance, MAX_DIST_KM) / MAX_DIST_KM
+    
+    # 유사도 점수 (거리가 짧을수록 점수가 높음)
+    similarity_score = 1.0 - normalized_distance
+    
+    return similarity_score
+
+def calculate_skill_similarity(user_skill: str, comp_grade: str, comp_sport: str) -> float:
+    """실력 유사도 점수를 계산합니다 (0 ~ 1.0)."""
+    
+    # 1. 대회 등급을 실력 레벨로 변환
+    comp_skill = get_skill_level_from_grade(comp_sport, comp_grade)
+    
+    # 2. 랭크 점수로 변환
+    user_rank = SKILL_RANK.get(user_skill, 0)
+    comp_rank = SKILL_RANK.get(comp_skill, 0)
+    
+    # 3. 랭크 차이 계산
+    rank_difference = abs(user_rank - comp_rank)
+    
+    # 4. 유사도 점수 계산 및 정규화 (최대 차이 3으로 나눔)
+    similarity_score = 1.0 - (rank_difference / 3.0) 
+    
+    return max(0.0, similarity_score)
+
+
+def calculate_recommendation_score(user_profile: Dict[str, Any], competition: Dict[str, Any]) -> Tuple[float, Optional[float], Optional[float]]:
+    """
+    선행 필터링(종목, 성별, 나이) 후, 실력 및 위치 유사도를 계산하여 최종 점수를 반환합니다.
+    (Score, Skill_Score, Location_Score)
+    """
+    
+    # 0. 필수 데이터 확인 및 선행 필터 적용에 필요한 변수 추출
+    comp_sport = competition.get("sport_category")
+    user_sports_map = {s['sport_name']: s['skill'] for s in user_profile.get('interesting_sports', [])}
+    
+    user_age = user_profile.get("age")
+    user_gender = user_profile.get("gender")
+    
+    comp_age = competition.get("age")
+    comp_gender = competition.get("gender")
+    
+    user_lat = user_profile.get("user_latitude")
+    user_lon = user_profile.get("user_longitude")
+    comp_lat = competition.get("latitude")
+    comp_lon = competition.get("longitude")
+    
+    # 1. 선행 필터링 (하나라도 불일치하면 바로 0점 반환)
+    # 1-1. 종목 필터 (Exact Match)
+    if comp_sport not in user_sports_map:
+        return 0.0, None, None
+        
+    # 1-2. 성별 필터 (Exact Match)
+    if not gender_matches(user_gender, comp_gender):
+        return 0.0, None, None
+        
+    # 1-3. 나이 필터 (Rule-based Range Check)
+    if not user_age or not age_matches(user_age, comp_age):
+        return 0.0, None, None
+
+    # 2. 유사도 계산
+    
+    # 2-1. 실력 유사도 계산 (Skill Similarity)
+    user_skill = user_sports_map.get(comp_sport, "무관")
+    comp_grade = competition.get("grade")
+    skill_score = calculate_skill_similarity(user_skill, comp_grade, comp_sport)
+    
+    # 2-2. 위치 유사도 계산 (Location Similarity)
+    if user_lat is None or comp_lat is None:
+        # 위치 정보가 없으면 중간값 (0.5)으로 처리
+        location_score = 0.5 
+    else:
+        location_score = calculate_location_similarity(user_lat, user_lon, comp_lat, comp_lon)
+
+    # 3. 종합 추천 점수 계산 (가중치 합산)
+    total_score = (SKILL_WEIGHT * skill_score) + (LOCATION_WEIGHT * location_score)
+    
+    return total_score, skill_score, location_score
+
+# ====================================================
+# DB 인터페이스
 # ====================================================
 
 async def get_user_profile(user_id: str) -> Dict[str, Any]:
-    """profiles 및 interesting_sports 테이블에서 사용자 정보를 가져옵니다."""
+    """profiles 및 interesting_sports 테이블에서 사용자 정보를 가져옵니다 (위치 포함)."""
     if not supabase:
         raise HTTPException(status_code=503, detail="Supabase가 연결되지 않았습니다.")
         
-    profile_res = supabase.table("profiles").select("age, gender").eq("id", user_id).execute()
+    # 'location' 컬럼을 추가하여 가져옵니다.
+    profile_res = supabase.table("profiles").select("age, gender, location").eq("id", user_id).execute()
     
     if not profile_res.data:
         raise HTTPException(status_code=404, detail="사용자 프로필(profiles 테이블)을 찾을 수 없습니다.")
         
     user_profile = profile_res.data[0]
     
+    # 1. 사용자 위치(location) WKB 파싱 및 위도/경도 추출
+    user_profile['user_latitude'] = None
+    user_profile['user_longitude'] = None
+    if user_profile.get('location'):
+        try:
+            # WKB 16진수 문자열 파싱
+            geom = wkb.loads(unhexlify(user_profile['location']))
+            user_profile['user_longitude'] = geom.x
+            user_profile['user_latitude'] = geom.y
+        except Exception as e:
+            print(f"⚠️ 사용자 위치 WKB 파싱 오류: {e}")
+            
+    user_profile.pop('location', None) # WKB 바이너리 제거
+    
+    # 2. interesting_sports 테이블에서 관심 종목 및 실력 가져오기
     sports_res = supabase.table("interesting_sports").select("sport_name, skill").eq("user_id", user_id).execute()
     
     user_profile['interesting_sports'] = sports_res.data
     
     return user_profile
-
-
-def is_competition_recommended(user_profile: Dict[str, Any], competition: Dict[str, Any]) -> bool:
-    """
-    4가지 기준(종목, 성별, 나이, 실력)을 모두 만족하는지 확인합니다.
-    """
-    
-    # 1. 종목 매칭
-    comp_sport = competition.get("sport_category")
-    user_sports_map = {s['sport_name']: s['skill'] for s in user_profile.get('interesting_sports', [])}
-    
-    if comp_sport not in user_sports_map:
-        return False
-
-    # 2. 성별 매칭
-    if not gender_matches(user_profile.get("gender"), competition.get("gender")):
-        return False
-
-    # 3. 나이 매칭
-    user_age = user_profile.get("age")
-    if not user_age or not age_matches(user_age, competition.get("age")):
-        return False
-        
-    # 4. 실력/등급 매칭
-    user_skill = user_sports_map.get(comp_sport)
-    comp_grade = competition.get("grade")
-    
-    try:
-        comp_skill_level = get_skill_level_from_grade(SportCategory(comp_sport), comp_grade)
-    except ValueError:
-        return False
-        
-    if comp_skill_level is None:
-        return False
-    
-    if comp_skill_level == "무관":
-        return True
-    
-    skill_ranking = {"상": 3, "중": 2, "하": 1}
-    user_rank = skill_ranking.get(user_skill, 0)
-    comp_rank = skill_ranking.get(comp_skill_level, 0)
-    
-    # 상위 실력자가 하위 등급 커버 허용
-    if user_rank >= comp_rank and comp_rank > 0:
-        return True
-        
-    return False
 
 # ====================================================
 # 엔드포인트
@@ -293,42 +391,9 @@ def read_root():
     """헬스체크 엔드포인트"""
     return {
         "message": "Sports Competition API is running!",
-        "version": "1.1.2",
+        "version": "2.0.4",
         "supabase_connected": supabase is not None
     }
-
-
-@app.get("/test/all-data")
-async def test_all_data():
-    """
-    테스트용: 모든 데이터 확인 엔드포인트 (페이지네이션 적용)
-    """
-    if not supabase:
-        raise HTTPException(
-            status_code=503,
-            detail={"success": False, "message": "Supabase가 연결되지 않았습니다."}
-        )
-    
-    try:
-        base_query = supabase.table("competitions").select("*")
-        all_data = await fetch_all_competitions_paginated(base_query)
-        total_count_fetched = len(all_data)
-        
-        print(f"📊 전체 대회 데이터: {total_count_fetched}개 (페이지네이션 적용)")
-        
-        return {
-            "success": True,
-            "total_count_fetched": total_count_fetched,
-            "message": f"페이지네이션을 통해 총 {total_count_fetched}개의 데이터를 가져왔습니다.",
-            "data": all_data
-        }
-        
-    except Exception as e:
-        print(f"\n❌ 에러: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={"success": False, "error": str(e), "message": "전체 데이터 조회 중 오류가 발생했습니다."}
-        )
 
 
 @app.get("/competitions", response_model=Dict[str, Any])
@@ -339,7 +404,7 @@ async def search_competitions(
     available_from: Optional[str] = Query(None, description="참가 가능 시작 날짜 (YYYY-MM-DD)")
 ):
     """
-    사용자가 선택한 조건에 맞는 대회 검색 (종목, 지역, 기간) - 페이지네이션 적용
+    사용자가 선택한 조건에 맞는 대회 검색 (기존 규칙 기반 검색 유지)
     """
     if not supabase:
         raise HTTPException(status_code=503, detail={"success": False, "message": "Supabase가 연결되지 않았습니다."})
@@ -373,7 +438,6 @@ async def search_competitions(
         }
         
     except Exception as e:
-        print(f"❌ 에러: {str(e)}\n")
         raise HTTPException(
             status_code=500,
             detail={"success": False, "error": str(e), "message": "대회 검색 중 오류가 발생했습니다."}
@@ -385,11 +449,9 @@ async def recommend_competitions(
     user_id: str = Query(..., description="추천받을 사용자의 ID", examples=["user_1"])
 ):
     """
-    [AI 추천 버튼] 클릭 시 호출: 사용자의 4가지 기준(실력, 나이, 성별, 종목)을 바탕으로 오늘 이후에 시작하는 대회를 추천합니다.
+    [AI 추천 버튼] 클릭 시 호출: 선행 필터 후 실력 및 위치 유사도를 기반으로 대회를 추천합니다.
     """
-    # ★★★ 수정 사항: available_from을 함수 내부에서 시스템 날짜로 고정 ★★★
     available_from: str = datetime.date.today().isoformat()
-    print(f"📌 추천 기준 날짜 (available_from): {available_from}")
     
     if not supabase:
         raise HTTPException(
@@ -397,34 +459,50 @@ async def recommend_competitions(
             detail={"success": False, "message": "Supabase가 연결되지 않았습니다."}
         )
         
-    # 1. 사용자 정보 가져오기
+    # 1. 사용자 정보 가져오기 (위도/경도 포함)
     try:
         user_profile = await get_user_profile(user_id)
     except HTTPException as e:
         raise e
     except Exception as e:
-        raise HTTPException(status_code=500, detail={"success": False, "message": "사용자 정보를 가져오는 중 오류가 발생했습니다."})
+        raise HTTPException(status_code=500, detail={"success": False, "message": f"사용자 정보를 가져오는 중 오류가 발생했습니다: {e}"})
 
-    # 2. 모든 대회 데이터 가져오기 (페이지네이션 적용)
+    # 2. 모든 대회 데이터 가져오기
     try:
         base_query = supabase.table("competitions").select("*")
         all_competitions = await fetch_all_competitions_paginated(base_query)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"success": False, "message": "대회 데이터를 가져오는 중 오류가 발생했습니다."})
 
-    # 3. 추천 로직 적용
-    recommended_competitions: List[Dict[str, Any]] = []
+    # 3. 추천 로직 적용 및 스코어링
+    scored_competitions: List[Dict[str, Any]] = []
     
     for competition in all_competitions:
-        # 1차 처리: WKB 파싱 및 날짜 필터링 (고정된 available_from 기준)
+        # 1차 처리: WKB 파싱 및 날짜 필터링
         processed_item = process_competition_data(competition.copy(), available_from)
         
         if not processed_item:
             continue
             
-        # 2차 처리: 4가지 AI 추천 기준 적용
-        if is_competition_recommended(user_profile, processed_item):
-            recommended_competitions.append(processed_item)
+        # 2차 처리: 선행 필터 및 유사도 기반 종합 점수 계산
+        total_score, skill_score, location_score = calculate_recommendation_score(
+            user_profile, 
+            processed_item
+        )
+        
+        if total_score > 0.0:
+            # 점수가 0보다 큰 경우에만 추천 목록에 추가
+            processed_item['recommendation_score'] = round(total_score, 4)
+            processed_item['skill_similarity'] = round(skill_score, 4) if skill_score is not None else 0.0
+            processed_item['location_similarity'] = round(location_score, 4) if location_score is not None else 0.0
+            scored_competitions.append(processed_item)
+
+    # 4. 종합 점수가 높은 순서대로 정렬
+    recommended_competitions = sorted(
+        scored_competitions, 
+        key=lambda x: x['recommendation_score'], 
+        reverse=True
+    )
     
     print(f"✅ AI 추천 결과: 총 {len(recommended_competitions)}개")
     
@@ -433,10 +511,11 @@ async def recommend_competitions(
         "user_profile_summary": {
             "age": user_profile.get("age"),
             "gender": user_profile.get("gender"),
+            "location": f"({user_profile.get('user_latitude', 'N/A')}, {user_profile.get('user_longitude', 'N/A')})",
             "sports": user_profile.get("interesting_sports"),
         },
         "count": len(recommended_competitions),
-        "message": f"사용자 ID {user_id}에게 총 {len(recommended_competitions)}개의 적합한 대회를 추천했습니다. (기준일: {available_from})",
+        "message": f"유사도 기반으로 사용자 ID {user_id}에게 총 {len(recommended_competitions)}개의 적합한 대회를 추천했습니다. (기준일: {available_from})",
         "data": recommended_competitions
     }
 
@@ -450,7 +529,7 @@ def health_check():
     return {
         "status": "healthy",
         "supabase_connected": supabase is not None,
-        "api_version": "1.1.2"
+        "api_version": "2.0.4"
     }
 
 if __name__ == "__main__":
