@@ -506,6 +506,7 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                 const SizedBox(height: 10),
                 Text('종목: ${competition.category}'),
                 Text('지역: ${competition.location}'),
+                Text('장소명: ${competition.locationName}'),
 
                 const Divider(height: 20), // 구분선
 
