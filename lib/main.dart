@@ -8,7 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:sports_app1/login_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'package:sports_app1/profile_screen.dart';
 
 // ----------------------------------------------------
 // 대회 데이터 모델
@@ -82,7 +82,7 @@ class Competition {
         }
       } catch (e) {
         // 날짜 파싱 오류 발생 시 기본값 유지
-        print("Registration period parsing error: $e");
+        //print("Registration period parsing error: $e");
       }
     }
 
@@ -186,7 +186,7 @@ void main() async {
   try {
     await dotenv.load(fileName: ".env");
   } catch (e) {
-    print("⚠️ .env 파일 로드 실패: $e");
+    //print("⚠️ .env 파일 로드 실패: $e");
   }
 
   // 2. Supabase 초기화 (로그인/회원가입 기능 사용을 위한 필수 단계)
@@ -199,12 +199,12 @@ void main() async {
         url: supabaseUrl,
         anonKey: supabaseAnonKey,
       );
-      print("✅ Supabase 클라이언트 초기화 성공!");
+      //print("✅ Supabase 클라이언트 초기화 성공!");
     } catch (e) {
-      print("⚠️ Supabase 클라이언트 초기화 실패: $e");
+      //print("⚠️ Supabase 클라이언트 초기화 실패: $e");
     }
   } else {
-    print("⚠️ SUPABASE_URL 또는 SUPABASE_ANON_KEY가 .env 파일에 설정되지 않았습니다. 인증 기능이 작동하지 않을 수 있습니다.");
+    //print("⚠️ SUPABASE_URL 또는 SUPABASE_ANON_KEY가 .env 파일에 설정되지 않았습니다. 인증 기능이 작동하지 않을 수 있습니다.");
   }
 
 
@@ -212,9 +212,9 @@ void main() async {
   final String? clientId = dotenv.env['GOOGLE_MAPS_API_KEY'];
 
   if (clientId != null && clientId.isNotEmpty) {
-    print("Google Maps API 키 로드 완료. (네이티브 파일에서 키 확인 필요)");
+    //print("Google Maps API 키 로드 완료. (네이티브 파일에서 키 확인 필요)");
   } else {
-    print("⚠️ GOOGLE_MAPS_API_KEY가 .env 파일에 설정되지 않았습니다. 지도는 작동하지 않을 수 있습니다.");
+    //print("⚠️ GOOGLE_MAPS_API_KEY가 .env 파일에 설정되지 않았습니다. 지도는 작동하지 않을 수 있습니다.");
   }
 
   runApp(const MyApp());
@@ -302,10 +302,12 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
     }
   }
 
-  // ✅ 프로필 수정 (임시 Placeholder)
+  // ✅ 프로필 수정
   void _editProfile() {
-    _showSnackBar('프로필 수정 화면으로 이동합니다. (기능 구현 예정)');
-    // 여기에 Navigator.push 등을 사용하여 프로필 수정 페이지로 이동하는 로직을 추가할 수 있습니다.
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ProfileScreen()),
+    );
   }
 
   // ✅ 현재 위치를 가져오는 함수
