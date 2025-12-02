@@ -490,33 +490,94 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
   }
 
   // 상세 정보 표시 모달
+  // 상세 정보 표시 모달 (개선된 디자인 적용)
   void _showCompetitionDetails(Competition competition) {
+    // 💡 아이콘, 레이블, 값을 계층적으로 표시하는 공통 위젯
+    Widget _buildIconTextRow(IconData icon, String label, String value) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 20, color: Colors.indigo), // 강조 색상 적용
+            const SizedBox(width: 15),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 13, color: Colors.grey), // 레이블은 보조 역할
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), // 값은 굵게 강조
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder( // 모달 상단에 둥근 모서리 추가
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) {
         return SingleChildScrollView(
           child: Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(25, 30, 25, 40),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(competition.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                // 1. 대회 제목
+                Text(
+                  competition.name,
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.black87),
+                ),
+                const Divider(height: 30),
+
+                // 2. 장소 정보 섹션
+                const Text(
+                  '📌 장소 정보',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
+                ),
                 const SizedBox(height: 10),
-                Text('종목: ${competition.category}'),
-                Text('지역: ${competition.location}'),
-                Text('장소명: ${competition.locationName}'),
 
-                const Divider(height: 20), // 구분선
+                _buildIconTextRow(Icons.place, '주소', competition.location),
+                _buildIconTextRow(Icons.pin_drop, '장소명', competition.locationName),
 
-                // 💡 접수 및 대회 기간 정보
-                Text('접수 시작일: ${competition.registrationStartDate}'),
-                Text('접수 마감일: ${competition.registerDeadline}'),
-                Text('대회 시작일: ${competition.startDate}'),
+                const SizedBox(height: 25),
 
+                // 3. 종목 및 대회 기간 정보 섹션
+                const Text(
+                  '⏱️ 대회 상세',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
+                ),
+                const SizedBox(height: 10),
 
-                const SizedBox(height: 20),
+                _buildIconTextRow(Icons.category, '종목', competition.category),
+                _buildIconTextRow(Icons.event_available, '대회 시작일', competition.startDate),
+
+                const SizedBox(height: 25),
+
+                // 4. 접수 기간 정보 섹션
+                const Text(
+                  '📝 접수 기간',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
+                ),
+                const SizedBox(height: 10),
+
+                _buildIconTextRow(Icons.schedule_send, '접수 시작일', competition.registrationStartDate),
+                _buildIconTextRow(Icons.date_range, '접수 마감일', competition.registerDeadline),
+
+                const SizedBox(height: 40),
+
+                // 5. 액션 버튼 (오른쪽 정렬)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -527,8 +588,16 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                     const SizedBox(width: 10),
                     ElevatedButton.icon(
                       onPressed: () => _launchURL(competition.registerUrl),
-                      icon: const Icon(Icons.app_registration),
-                      label: const Text('등록하기'),
+                      icon: const Icon(Icons.link),
+                      label: const Text('등록 사이트 이동', style: TextStyle(fontSize: 15)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.indigo, // 강조 색상으로 변경
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
                     ),
                   ],
                 ),
