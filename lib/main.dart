@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:geolocator/geolocator.dart'; // ✅ 사용자 위치 기능
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -9,6 +9,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:sports_app1/login_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:sports_app1/profile_screen.dart';
+
+// ✅ 새 화면 Import
+import 'package:sports_app1/public_sport_programs_screen.dart';
+import 'package:sports_app1/sport_clubs_screen.dart';
+import 'package:sports_app1/team_board_screen.dart';
 
 // ----------------------------------------------------
 // 대회 데이터 모델
@@ -103,7 +108,6 @@ class Competition {
       registrationStartDate: registrationStartDate,  // 접수 시작일
       registerDeadline: registerDeadline, // 접수 마감일
 
-
     );
   }
 }
@@ -160,7 +164,8 @@ const Map<String, List<String>> kCityCountyMap = {
   // 7. 충청남도
   '충청남도': ['전체 시/군/구', '천안시', '공주시', '보령시', '아산시', '서산시', '논산시', '계룡시', '당진시', '금산군', '부여군', '서천군', '청양군', '홍성군', '예산군', '태안군'],
   // 8. 전북특별자치도
-  '전북특별자치도': ['전체 시/군/구', '전주시', '군산시', '익산시', '정읍시', '남원시', '김제시', '완주군', '진안군', '무주군', '장수군', '임실군', '순창군', '고창군', '부안군'],
+  '전북특별자치': ['전체 시/군/구', '전주시', '군산시', '익산시', '정읍시', '남원시', '김제시', '완주군', '진안군', '무주군', '장수군', '임실군', '순창군', '고창군', '부안군'],
+
   // 9. 전라남도
   '전라남도': ['전체 시/군/구', '목포시', '여수시', '순천시', '나주시', '광양시', '담양군', '곡성군', '구례군', '고흥군', '보성군', '화순군', '장흥군', '강진군', '해남군', '영암군', '무안군', '함평군', '영광군', '장성군', '완도군', '진도군', '신안군'],
   // 10. 경상북도
@@ -172,6 +177,7 @@ const Map<String, List<String>> kCityCountyMap = {
 };
 
 const LatLng kInitialCameraPosition = LatLng(37.5665, 126.9780); // 서울 시청
+
 
 
 // ----------------------------------------------------
@@ -207,7 +213,6 @@ void main() async {
     //print("⚠️ SUPABASE_URL 또는 SUPABASE_ANON_KEY가 .env 파일에 설정되지 않았습니다. 인증 기능이 작동하지 않을 수 있습니다.");
   }
 
-
   // 💡 .env에서 클라이언트 ID 가져오기 (Google Maps용)
   final String? clientId = dotenv.env['GOOGLE_MAPS_API_KEY'];
 
@@ -221,6 +226,7 @@ void main() async {
 }
 
 class MyApp extends StatelessWidget {
+
   const MyApp({super.key});
 
   @override
@@ -229,6 +235,7 @@ class MyApp extends StatelessWidget {
       title: 'Sports Competition App',
       theme: ThemeData(
         primarySwatch: Colors.blue,
+
         useMaterial3: true,
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.blue,
@@ -256,6 +263,9 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
   Set<Marker> _markers = {};
   List<Competition> _competitions = [];
   bool _isLoading = false;
+  // 💡 네비게이션 바 관리를 위한 상태 추가
+  int _selectedIndex = 0;
+
 
   // 검색 조건
   String _selectedCategory = kSportCategories.first;
@@ -265,7 +275,7 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
   String _selectedCityCounty = '전체 시/군/구';
   DateTime? _selectedDate;
 
-  // 백엔드에서 제공하는 사용자 위치 (예시)
+  // ✅ 사용자 위치 변수 복구
   LatLng _userCurrentLocation = kInitialCameraPosition;
 
   @override
@@ -273,9 +283,35 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
     super.initState();
     // _selectedCityCounty 초기값을 _selectedProvince의 리스트에서 가져와 불일치 방지
     _selectedCityCounty = kCityCountyMap[_selectedProvince]!.first;
+    // ✅ 사용자 위치 확인 로직 복구
     _determinePosition();
     _fetchCompetitions(isInitial: true);
   }
+
+  // ✅ 네비게이션 바 항목 탭 시 실행될 함수 (화면 연결 로직)
+  void _onItemTapped(int index) {
+    // 같은 버튼을 누르면 아무것도 하지 않음 (홈 버튼은 아래에서 처리)
+    if (index == _selectedIndex) {
+      if (index == 0) return; // 이미 홈일 경우
+    }
+
+    // 화면 목록 (index 순서대로)
+    final List<Widget> pages = [
+      const CompetitionMapScreen(),        // 0: 홈 (현재 화면)
+      const PublicSportProgramsScreen(),  // 1: 프로그램
+      const SportClubsScreen(),           // 2: 동호회
+      const TeamBoardScreen(),            // 3: 팀원 모집
+    ];
+
+    // 스택을 교체하여 새 화면으로 이동 (뒤로 가기 시 홈 화면이 아닌 이전 화면으로 이동 방지)
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => pages[index],
+      ),
+    );
+  }
+
+
 
   // ✅ Supabase 로그아웃 처리 (오류 수정: .client 추가)
   Future<void> _logout() async {
@@ -310,7 +346,7 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
     );
   }
 
-  // ✅ 현재 위치를 가져오는 함수
+  // ✅ 현재 위치를 가져오는 함수 (복구)
   Future<void> _determinePosition() async {
     bool serviceEnabled;
     LocationPermission permission;
@@ -325,12 +361,13 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        _showSnackBar('위치 권한이 거부되었습니다.');
+        _showSnackBar('위치 권한이 거부되었습니다. 서울 시청 위치를 보여줍니다.');
+        return;
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
-      _showSnackBar('위치 권한이 영구적으로 거부되었습니다. 앱 설정에서 권한을 허용해주세요.');
+      _showSnackBar('위치 권한이 영구적으로 거부되었습니다. 앱 설정에서 권한을 허용해주세요. 서울 시청 위치를 보여줍니다.');
       return;
     }
 
@@ -341,11 +378,11 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
       });
       _moveCameraToCurrentUserLocation();
     } catch (e) {
-      _showSnackBar('현재 위치를 가져오는 데 실패했습니다: $e');
+      _showSnackBar('현재 위치를 가져오는 데 실패했습니다: $e. 서울 시청 위치를 보여줍니다.');
     }
   }
 
-  // ✅ 현재 위치로 카메라를 이동하는 함수
+  // ✅ 현재 위치로 카메라를 이동하는 함수 (복구)
   void _moveCameraToCurrentUserLocation() {
     if (_mapController != null) {
       _mapController!.animateCamera(
@@ -353,7 +390,6 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
       );
     }
   }
-
 
   // 대회 데이터 로드 및 지도에 표시
   Future<void> _fetchCompetitions({bool isInitial = false}) async {
@@ -457,43 +493,85 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
     });
   }
 
+
   // 검색 결과에 따라 지도 비율 변경 로직 (Google Maps용)
   void _adjustMapBounds() {
     if (_mapController == null || _competitions.isEmpty) {
       return;
     }
 
-    if (_competitions.length == 1) {
+    // 💡 1. 검색 결과가 없으면 한국의 중심(초기 위치)로 이동
+    if (_competitions.isEmpty) {
       _mapController!.animateCamera(CameraUpdate.newLatLngZoom(
-        _competitions.first.latLng,
-        14,
+        kInitialCameraPosition, // 서울 시청 위치 (한국 중심)
+        12, // 한국 전체를 볼 수 있는 적절한 줌 레벨
       ));
       return;
     }
 
-    // 결과가 여러 개일 경우, 모든 마커를 포함하는 경계 계산
+    // 결과가 1개일 경우, 해당 마커 위치로 줌 인
+    if (_competitions.length == 1) {
+      _mapController!.animateCamera(CameraUpdate.newLatLngZoom(
+        _competitions.first.latLng,
+        15, // 상세 위치를 볼 수 있는 줌 레벨
+      ));
+      return;
+    }
+
+    // 💡 2. 결과가 여러 개일 경우: 모든 마커를 포함하는 경계 계산
     double minLat = _competitions.map((c) => c.latLng.latitude).reduce((a, b) => a < b ? a : b);
     double maxLat = _competitions.map((c) => c.latLng.latitude).reduce((a, b) => a > b ? a : b);
     double minLng = _competitions.map((c) => c.latLng.longitude).reduce((a, b) => a < b ? a : b);
     double maxLng = _competitions.map((c) => c.latLng.longitude).reduce((a, b) => a > b ? a : b);
+
 
     final bounds = LatLngBounds(
       southwest: LatLng(minLat, minLng),
       northeast: LatLng(maxLat, maxLng),
     );
 
-    // 경계에 맞게 지도 뷰 이동 (패딩 100)
+    // 💡 3. 지도 경계에 맞춰 카메라 이
     _mapController!.animateCamera(CameraUpdate.newLatLngBounds(
       bounds,
-      100,
+      50, // 좌, 우, 하단에 적용할 기본 여백
     ));
   }
 
+
+  // 💡 아이콘, 레이블, 값을 계층적으로 표시하는 공통 위젯
+  Widget _buildIconTextRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: Colors.blueGrey), // 차분한 색상
+          const SizedBox(width: 15),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 13, color: Colors.grey), // 레이블은 보조 역할
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87), // 값은 굵게 강조
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // 상세 정보 표시 모달
-  // 상세 정보 표시 모달 (개선된 디자인 적용)
   void _showCompetitionDetails(Competition competition) {
     // 💡 아이콘, 레이블, 값을 계층적으로 표시하는 공통 위젯
-    Widget _buildIconTextRow(IconData icon, String label, String value) {
+    Widget _buildModalIconTextRow(IconData icon, String label, String value) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
         child: Row(
@@ -548,8 +626,8 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                 ),
                 const SizedBox(height: 10),
 
-                _buildIconTextRow(Icons.place, '주소', competition.location),
-                _buildIconTextRow(Icons.pin_drop, '장소명', competition.locationName),
+                _buildModalIconTextRow(Icons.place, '주소', competition.location),
+                _buildModalIconTextRow(Icons.pin_drop, '장소명', competition.locationName),
 
                 const SizedBox(height: 25),
 
@@ -560,8 +638,8 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                 ),
                 const SizedBox(height: 10),
 
-                _buildIconTextRow(Icons.category, '종목', competition.category),
-                _buildIconTextRow(Icons.event_available, '대회 시작일', competition.startDate),
+                _buildModalIconTextRow(Icons.category, '종목', competition.category),
+                _buildModalIconTextRow(Icons.event_available, '대회 시작일', competition.startDate),
 
                 const SizedBox(height: 25),
 
@@ -572,8 +650,8 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                 ),
                 const SizedBox(height: 10),
 
-                _buildIconTextRow(Icons.schedule_send, '접수 시작일', competition.registrationStartDate),
-                _buildIconTextRow(Icons.date_range, '접수 마감일', competition.registerDeadline),
+                _buildModalIconTextRow(Icons.schedule_send, '접수 시작일', competition.registrationStartDate),
+                _buildModalIconTextRow(Icons.date_range, '접수 마감일', competition.registerDeadline),
 
                 const SizedBox(height: 40),
 
@@ -705,23 +783,25 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
       ),
       body: Stack(
         children: [
-
           // 1. GoogleMap 위젯
           GoogleMap(
             mapType: MapType.normal,
+            // ✅ 사용자 위치 또는 서울 시청(초기값)을 타겟으로 사용
             initialCameraPosition: CameraPosition(
               target: _userCurrentLocation,
               zoom: 10,
             ),
             onMapCreated: (GoogleMapController controller) {
               _mapController = controller;
+              // ✅ 지도 생성 후 카메라 이동 시도
               _moveCameraToCurrentUserLocation();
+
             },
             markers: _markers,
+            // ✅ 내 위치 표시 활성화
             myLocationEnabled: true,
-            padding: const EdgeInsets.only(top: 280),
+            padding: const EdgeInsets.only(top: 260),
           ),
-
 
           // 로딩 인디케이터
           if (_isLoading)
@@ -808,6 +888,7 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                           },
                         ),
                       ),
+
                       // 2단계: 시/군/구 선택 (Expanded 적용)
                       Expanded(
                         child: _buildDropdown(
@@ -842,65 +923,61 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  // 4. AI 맞춤 대회 추천 받기 버튼 (대회 검색 바로 밑에 위치)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        _showSnackBar('AI 추천 기능 설정 화면으로 이동합니다.');
+                      },
+                      icon: const Icon(Icons.smart_toy_outlined, size: 20),
+                      label: const Text('AI 맞춤 대회 추천 받기', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFEE135),
+                        // backgroundColor: Colors.gray, // AI 기능을 강조하는 색상
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        elevation: 3,
+                      ),
+                    ),
+                  ),
+
                 ],
               ),
             ),
           ),
+        ],
+      ),
 
-          // 3. 하단 AI 추천 / 지도자 매칭 버튼 영역
-          Positioned(
-            bottom: 20,
-            left: 10,
-            right: 10,
-            child: Row(
-              children: [
-                // AI 추천 버튼
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: ElevatedButton(
-                      onPressed: () {
-                        _showSnackBar('AI 추천 기능 준비 중입니다.');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Colors.grey),
-                        ),
-                      ),
-                      child: const Text('AI 추천', style: TextStyle(fontSize: 16)),
-                    ),
-                  ),
-                ),
-
-                // 지도자 매칭 버튼
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 8.0),
-                    child: ElevatedButton(
-                      onPressed: () {
-                        _showSnackBar('지도자 매칭 페이지로 이동합니다.');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Colors.grey),
-                        ),
-                      ),
-                      child: const Text('지도자 매칭', style: TextStyle(fontSize: 16)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+      // 4. 하단 네비게이션 바 추가
+      bottomNavigationBar: BottomNavigationBar(
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            label: '홈',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.run_circle_outlined),
+            label: '프로그램',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.people_alt_outlined),
+            label: '동호회',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.group_add_outlined),
+            label: '팀원 모집',
           ),
         ],
+        currentIndex: _selectedIndex,
+        selectedItemColor: Colors.blue, // 선택된 항목의 색상
+        unselectedItemColor: Colors.grey, // 선택되지 않은 항목의 색상
+        type: BottomNavigationBarType.fixed, // 아이템 수가 많을 때 레이아웃 고정
+        onTap: _onItemTapped, // ✅ 수정된 화면 이동 로직
       ),
     );
   }
