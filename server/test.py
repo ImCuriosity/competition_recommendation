@@ -9,6 +9,7 @@ from shapely import wkb
 from binascii import unhexlify
 import datetime
 import math
+import uuid
 
 # ====================================================
 # 상수 및 초기 설정
@@ -83,8 +84,8 @@ load_dotenv()
 # FastAPI 앱 생성
 app = FastAPI(
     title="Sports Competition API (Similarity Recommendation)",
-    description="운동 대회 검색 및 임베딩/유사도 기반 AI 추천 API",
-    version="2.0.4" # 보디빌딩 매핑 최종 업데이트
+    description="운동 대회 검색 및 임베딩/유사도 기반 AI 추천 API (V2.1 - 종목별 Top-N)",
+    version="2.1.0" # 버전 업데이트
 )
 
 # Supabase 클라이언트 초기화 (조건부)
@@ -158,6 +159,8 @@ def process_competition_data(item: Dict[str, Any], available_from: Optional[str]
         item['latitude'] = None
 
     # 3. 데이터 정리
+    # 'event_period'는 대회 테이블에 없으므로, 'start_date'를 대회 이름에서 추출했다고 가정하고, 
+    # 'start_date'가 'event_period' 역할을 한다고 가정하고 코드를 유지합니다.
     if item.get('event_period'):
         item['start_date'] = item.pop('event_period', '').split(',')[0].replace('[', '').strip()
     else:
@@ -299,6 +302,7 @@ def calculate_recommendation_score(user_profile: Dict[str, Any], competition: Di
     
     # 0. 필수 데이터 확인 및 선행 필터 적용에 필요한 변수 추출
     comp_sport = competition.get("sport_category")
+    # user_sports_map은 함수 내에서 생성하여 종목 필터링에 사용됩니다.
     user_sports_map = {s['sport_name']: s['skill'] for s in user_profile.get('interesting_sports', [])}
     
     user_age = user_profile.get("age")
@@ -328,6 +332,7 @@ def calculate_recommendation_score(user_profile: Dict[str, Any], competition: Di
     # 2. 유사도 계산
     
     # 2-1. 실력 유사도 계산 (Skill Similarity)
+    # 종목 필터가 통과했으므로 해당 종목의 실력은 반드시 user_sports_map에 있습니다.
     user_skill = user_sports_map.get(comp_sport, "무관")
     comp_grade = competition.get("grade")
     skill_score = calculate_skill_similarity(user_skill, comp_grade, comp_sport)
@@ -376,9 +381,20 @@ async def get_user_profile(user_id: str) -> Dict[str, Any]:
     user_profile.pop('location', None) # WKB 바이너리 제거
     
     # 2. interesting_sports 테이블에서 관심 종목 및 실력 가져오기
-    sports_res = supabase.table("interesting_sports").select("sport_name, skill").eq("user_id", user_id).execute()
-    
+    try:
+        # user_id 문자열을 UUID 객체로 변환
+        user_uuid = uuid.UUID(user_id)
+        # 쿼리에 UUID 객체를 직접 전달
+        sports_res = supabase.table("interesting_sports").select("sport_name, skill").eq("user_id", user_uuid).execute()
+        
+    except ValueError:
+        # 만약 user_id가 유효한 UUID 형식이 아니라면, 기존처럼 문자열로 쿼리
+        print(f"⚠️ 경고: user_id '{user_id}'가 유효한 UUID 형식이 아니므로 문자열로 쿼리합니다.")
+        sports_res = supabase.table("interesting_sports").select("sport_name, skill").eq("user_id", user_id).execute()
+        
     user_profile['interesting_sports'] = sports_res.data
+    
+    print(f"DEBUG UUID FIX: interesting_sports 조회 결과: {sports_res.data}")
     
     return user_profile
 
@@ -391,7 +407,7 @@ def read_root():
     """헬스체크 엔드포인트"""
     return {
         "message": "Sports Competition API is running!",
-        "version": "2.0.4",
+        "version": "2.1.0",
         "supabase_connected": supabase is not None
     }
 
@@ -443,13 +459,17 @@ async def search_competitions(
             detail={"success": False, "error": str(e), "message": "대회 검색 중 오류가 발생했습니다."}
         )
 
+# =========================================================================
+# ★★★ [수정된 핵심 엔드포인트] recommend_competitions 함수 ★★★
+# =========================================================================
 @app.get("/recommend/competitions", response_model=Dict[str, Any])
 async def recommend_competitions(
     user_id: str = Query(..., description="추천받을 사용자의 ID", examples=["user_1"]),
-    top_n: int = Query(3, description="반환할 상위 추천 대회 개수") # <--- TOP_N 인자 추가
+    # top_n 인자는 종목별 추천 개수를 결정합니다.
+    top_n: int = Query(3, description="반환할 상위 추천 대회 개수 (종목별 개수)", ge=1) 
 ):
     """
-    [AI 추천 버튼] 클릭 시 호출: 선행 필터 후 실력 및 위치 유사도를 기반으로 대회를 추천합니다.
+    [AI 추천 버튼] 클릭 시 호출: 모든 관심 종목별로 지정된 개수(top_n)만큼 대회를 추천합니다.
     """
     available_from: str = datetime.date.today().isoformat()
     
@@ -467,6 +487,23 @@ async def recommend_competitions(
     except Exception as e:
         raise HTTPException(status_code=500, detail={"success": False, "message": f"사용자 정보를 가져오는 중 오류가 발생했습니다: {e}"})
 
+    # 1-1. 사용자 관심 종목을 (종목명: 실력) 맵으로 변환
+    user_sports_map = {s['sport_name']: s['skill'] for s in user_profile.get('interesting_sports', [])}
+
+    # 관심 종목이 없으면 추천 불가
+    if not user_sports_map:
+        return {
+            "success": True,
+            "count": 0,
+            "message": "사용자의 관심 종목이 없어 추천을 생성할 수 없습니다.",
+            "data": {},
+            "user_profile_summary": {
+                "age": user_profile.get("age"), "gender": user_profile.get("gender"), 
+                "location": f"({user_profile.get('user_latitude', 'N/A')}, {user_profile.get('user_longitude', 'N/A')})",
+                "sports": user_profile.get('interesting_sports')
+            }
+        }
+        
     # 2. 모든 대회 데이터 가져오기
     try:
         base_query = supabase.table("competitions").select("*")
@@ -474,40 +511,56 @@ async def recommend_competitions(
     except Exception as e:
         raise HTTPException(status_code=500, detail={"success": False, "message": "대회 데이터를 가져오는 중 오류가 발생했습니다."})
 
-    # 3. 추천 로직 적용 및 스코어링
-    scored_competitions: List[Dict[str, Any]] = []
-    
+    # 3. 종목별 추천 목록 초기화
+    # { "배드민턴": [ {대회1}, {대회2}, ... ], "마라톤": [ ... ] }
+    scored_competitions_by_sport: Dict[str, List[Dict[str, Any]]] = {
+        sport_name: [] for sport_name in user_sports_map.keys()
+    }
+
+    # 4. 모든 대회를 순회하며 종목별로 스코어링 및 분류
     for competition in all_competitions:
-        # 1차 처리: WKB 파싱 및 날짜 필터링
         processed_item = process_competition_data(competition.copy(), available_from)
         
         if not processed_item:
             continue
             
-        # 2차 처리: 선행 필터 및 유사도 기반 종합 점수 계산
+        comp_sport = processed_item.get("sport_category")
+        
+        # 선행 필터 및 유사도 기반 종합 점수 계산
         total_score, skill_score, location_score = calculate_recommendation_score(
             user_profile, 
             processed_item
         )
         
-        if total_score > 0.0:
-            # 점수가 0보다 큰 경우에만 추천 목록에 추가
+        # 점수가 0보다 크고 (필터 통과), 해당 종목이 사용자의 관심 종목 맵에 존재하는 경우
+        if total_score > 0.0 and comp_sport in scored_competitions_by_sport:
+            
             processed_item['recommendation_score'] = round(total_score, 4)
             processed_item['skill_similarity'] = round(skill_score, 4) if skill_score is not None else 0.0
             processed_item['location_similarity'] = round(location_score, 4) if location_score is not None else 0.0
-            scored_competitions.append(processed_item)
+            
+            # 해당 종목의 리스트에 추가
+            scored_competitions_by_sport[comp_sport].append(processed_item)
 
-    # 4. 종합 점수가 높은 순서대로 정렬 및 상위 N개만 선택 (수정된 부분)
-    recommended_competitions = sorted(
-        scored_competitions, 
-        key=lambda x: x['recommendation_score'], 
-        reverse=True
-    )
+    # 5. 종목별로 정렬 및 Top-N 슬라이싱
+    final_recommendations: Dict[str, List[Dict[str, Any]]] = {}
+    total_recommended_count = 0
     
-    # ★★★ 상위 TOP_N (기본값 3개) 만 슬라이싱 ★★★
-    top_recommended_competitions = recommended_competitions[:top_n]
-    
-    print(f"✅ AI 추천 결과: 총 {len(recommended_competitions)}개 중 상위 {len(top_recommended_competitions)}개 반환")
+    for sport_name, competitions in scored_competitions_by_sport.items():
+        # 점수가 높은 순서대로 정렬
+        sorted_competitions = sorted(
+            competitions, 
+            key=lambda x: x['recommendation_score'], 
+            reverse=True
+        )
+        
+        # 사용자가 요청한 top_n 개수만큼 슬라이싱
+        top_n_competitions = sorted_competitions[:top_n]
+        
+        final_recommendations[sport_name] = top_n_competitions
+        total_recommended_count += len(top_n_competitions)
+
+    print(f"✅ AI 추천 결과: 종목별로 총 {total_recommended_count}개의 대회가 반환됨 (요청 개수: {top_n}개)")
     
     return {
         "success": True,
@@ -517,12 +570,13 @@ async def recommend_competitions(
             "location": f"({user_profile.get('user_latitude', 'N/A')}, {user_profile.get('user_longitude', 'N/A')})",
             "sports": user_profile.get("interesting_sports"),
         },
-        "count": len(top_recommended_competitions),
-        "total_scored_count": len(recommended_competitions), # 총 스코어링된 개수 추가
-        "message": f"유사도 기반으로 사용자 ID {user_id}에게 총 {len(top_recommended_competitions)}개의 적합한 대회를 추천했습니다. (기준일: {available_from})",
-        "data": top_recommended_competitions
+        "count": total_recommended_count, # 전체 추천된 대회 수
+        "top_n_per_sport": top_n, # 종목별 요청 개수
+        "message": f"유사도 기반으로 사용자 ID {user_id}의 관심 종목별로 각각 상위 {top_n}개의 적합한 대회를 추천했습니다. (기준일: {available_from})",
+        # ★ 최종 결과는 종목별로 묶인 Dictionary 형태로 반환됩니다.
+        "recommended_by_sport": final_recommendations 
     }
-
+# =========================================================================
 
 # ====================================================
 # 서버 실행
@@ -534,9 +588,10 @@ def health_check():
     return {
         "status": "healthy",
         "supabase_connected": supabase is not None,
-        "api_version": "2.0.4"
+        "api_version": "2.1.0"
     }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080, reload=True)
+    # uvicorn.run(app, host="0.0.0.0", port=8080, reload=True)
+    pass
