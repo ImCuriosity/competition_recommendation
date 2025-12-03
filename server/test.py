@@ -443,7 +443,6 @@ async def search_competitions(
             detail={"success": False, "error": str(e), "message": "대회 검색 중 오류가 발생했습니다."}
         )
 
-
 @app.get("/recommend/competitions", response_model=Dict[str, Any])
 async def recommend_competitions(
     user_id: str = Query(..., description="추천받을 사용자의 ID", examples=["user_1"]),
@@ -523,6 +522,7 @@ async def recommend_competitions(
         "message": f"유사도 기반으로 사용자 ID {user_id}에게 총 {len(top_recommended_competitions)}개의 적합한 대회를 추천했습니다. (기준일: {available_from})",
         "data": top_recommended_competitions
     }
+
 
 # ====================================================
 # 서버 실행

@@ -9,6 +9,7 @@ from shapely import wkb
 from binascii import unhexlify
 import datetime
 import math
+import uuid
 
 # ====================================================
 # 상수 및 초기 설정
@@ -376,9 +377,27 @@ async def get_user_profile(user_id: str) -> Dict[str, Any]:
     user_profile.pop('location', None) # WKB 바이너리 제거
     
     # 2. interesting_sports 테이블에서 관심 종목 및 실력 가져오기
-    sports_res = supabase.table("interesting_sports").select("sport_name, skill").eq("user_id", user_id).execute()
+    
+    # =========================================================================
+    # ★★★ UUID 타입 매칭을 위한 수정 부분 ★★★
+    try:
+        # 1. user_id 문자열을 UUID 객체로 변환
+        user_uuid = uuid.UUID(user_id)
+        # 2. 쿼리에 UUID 객체를 직접 전달하여 Supabase 클라이언트가 
+        #    PostgreSQL UUID 타입과 정확히 비교하도록 유도
+        sports_res = supabase.table("interesting_sports").select("sport_name, skill").eq("user_id", user_uuid).execute()
+        
+    except ValueError:
+        # 만약 user_id가 유효한 UUID 형식이 아니라면 (예외 상황), 기존처럼 문자열로 쿼리
+        print(f"⚠️ 경고: user_id '{user_id}'가 유효한 UUID 형식이 아니므로 문자열로 쿼리합니다.")
+        sports_res = supabase.table("interesting_sports").select("sport_name, skill").eq("user_id", user_id).execute()
+        
+    # =========================================================================
     
     user_profile['interesting_sports'] = sports_res.data
+    
+    # 디버깅: 이제 데이터가 잘 나오는지 최종 확인
+    print(f"DEBUG UUID FIX: interesting_sports 조회 결과: {sports_res.data}")
     
     return user_profile
 
@@ -443,10 +462,10 @@ async def search_competitions(
             detail={"success": False, "error": str(e), "message": "대회 검색 중 오류가 발생했습니다."}
         )
 
-
 @app.get("/recommend/competitions", response_model=Dict[str, Any])
 async def recommend_competitions(
-    user_id: str = Query(..., description="추천받을 사용자의 ID", examples=["user_1"])
+    user_id: str = Query(..., description="추천받을 사용자의 ID", examples=["user_1"]),
+    top_n: int = Query(3, description="반환할 상위 추천 대회 개수") # <--- TOP_N 인자 추가
 ):
     """
     [AI 추천 버튼] 클릭 시 호출: 선행 필터 후 실력 및 위치 유사도를 기반으로 대회를 추천합니다.
@@ -497,14 +516,17 @@ async def recommend_competitions(
             processed_item['location_similarity'] = round(location_score, 4) if location_score is not None else 0.0
             scored_competitions.append(processed_item)
 
-    # 4. 종합 점수가 높은 순서대로 정렬
+    # 4. 종합 점수가 높은 순서대로 정렬 및 상위 N개만 선택 (수정된 부분)
     recommended_competitions = sorted(
         scored_competitions, 
         key=lambda x: x['recommendation_score'], 
         reverse=True
     )
     
-    print(f"✅ AI 추천 결과: 총 {len(recommended_competitions)}개")
+    # ★★★ 상위 TOP_N (기본값 3개) 만 슬라이싱 ★★★
+    top_recommended_competitions = recommended_competitions[:top_n]
+    
+    print(f"✅ AI 추천 결과: 총 {len(recommended_competitions)}개 중 상위 {len(top_recommended_competitions)}개 반환")
     
     return {
         "success": True,
@@ -514,10 +536,12 @@ async def recommend_competitions(
             "location": f"({user_profile.get('user_latitude', 'N/A')}, {user_profile.get('user_longitude', 'N/A')})",
             "sports": user_profile.get("interesting_sports"),
         },
-        "count": len(recommended_competitions),
-        "message": f"유사도 기반으로 사용자 ID {user_id}에게 총 {len(recommended_competitions)}개의 적합한 대회를 추천했습니다. (기준일: {available_from})",
-        "data": recommended_competitions
+        "count": len(top_recommended_competitions),
+        "total_scored_count": len(recommended_competitions), # 총 스코어링된 개수 추가
+        "message": f"유사도 기반으로 사용자 ID {user_id}에게 총 {len(top_recommended_competitions)}개의 적합한 대회를 추천했습니다. (기준일: {available_from})",
+        "data": top_recommended_competitions
     }
+
 
 # ====================================================
 # 서버 실행
