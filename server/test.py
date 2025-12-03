@@ -446,7 +446,8 @@ async def search_competitions(
 
 @app.get("/recommend/competitions", response_model=Dict[str, Any])
 async def recommend_competitions(
-    user_id: str = Query(..., description="추천받을 사용자의 ID", examples=["user_1"])
+    user_id: str = Query(..., description="추천받을 사용자의 ID", examples=["user_1"]),
+    top_n: int = Query(3, description="반환할 상위 추천 대회 개수") # <--- TOP_N 인자 추가
 ):
     """
     [AI 추천 버튼] 클릭 시 호출: 선행 필터 후 실력 및 위치 유사도를 기반으로 대회를 추천합니다.
@@ -497,14 +498,17 @@ async def recommend_competitions(
             processed_item['location_similarity'] = round(location_score, 4) if location_score is not None else 0.0
             scored_competitions.append(processed_item)
 
-    # 4. 종합 점수가 높은 순서대로 정렬
+    # 4. 종합 점수가 높은 순서대로 정렬 및 상위 N개만 선택 (수정된 부분)
     recommended_competitions = sorted(
         scored_competitions, 
         key=lambda x: x['recommendation_score'], 
         reverse=True
     )
     
-    print(f"✅ AI 추천 결과: 총 {len(recommended_competitions)}개")
+    # ★★★ 상위 TOP_N (기본값 3개) 만 슬라이싱 ★★★
+    top_recommended_competitions = recommended_competitions[:top_n]
+    
+    print(f"✅ AI 추천 결과: 총 {len(recommended_competitions)}개 중 상위 {len(top_recommended_competitions)}개 반환")
     
     return {
         "success": True,
@@ -514,9 +518,10 @@ async def recommend_competitions(
             "location": f"({user_profile.get('user_latitude', 'N/A')}, {user_profile.get('user_longitude', 'N/A')})",
             "sports": user_profile.get("interesting_sports"),
         },
-        "count": len(recommended_competitions),
-        "message": f"유사도 기반으로 사용자 ID {user_id}에게 총 {len(recommended_competitions)}개의 적합한 대회를 추천했습니다. (기준일: {available_from})",
-        "data": recommended_competitions
+        "count": len(top_recommended_competitions),
+        "total_scored_count": len(recommended_competitions), # 총 스코어링된 개수 추가
+        "message": f"유사도 기반으로 사용자 ID {user_id}에게 총 {len(top_recommended_competitions)}개의 적합한 대회를 추천했습니다. (기준일: {available_from})",
+        "data": top_recommended_competitions
     }
 
 # ====================================================
