@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:sports_app1/main.dart'; // For kBaseUrl, kSportCategories, etc.
+import 'package:sports_app1/team_board_create_screen.dart';
+import 'package:sports_app1/team_board_detail_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // --- Data Models ---
@@ -49,7 +51,7 @@ class TeamBoardPost {
       maxMemberCount: json['max_member_count'],
       viewsCount: json['views_count'] ?? 0,
       createdAt: DateTime.parse(json['created_at']),
-      authorUsername: json['profiles']?['username'] ?? '익명', // Assuming profiles table join
+      authorUsername: json['profiles']?['nickname'] ?? '익명', // BUG FIX: username -> nickname
     );
   }
 }
@@ -125,13 +127,25 @@ class _TeamBoardScreenState extends State<TeamBoardScreen> {
   }
 
   void _navigateToPostDetail(TeamBoardPost post) {
-    // Note: Detail screen to be implemented
-    _showSnackBar('상세보기 화면으로 이동합니다.');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TeamBoardDetailScreen(postId: post.id),
+      ),
+    ).then((_) => _fetchPosts()); // 상세 페이지에서 돌아왔을 때 목록 새로고침
   }
 
-  void _navigateToCreatePost() {
-    // Note: Create post screen to be implemented
-    _showSnackBar('글쓰기 화면으로 이동합니다.');
+  void _navigateToCreatePost() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const TeamBoardCreateScreen(),
+      ),
+    );
+
+    if (result == true) {
+      _fetchPosts();
+    }
   }
 
   @override
@@ -153,32 +167,65 @@ class _TeamBoardScreenState extends State<TeamBoardScreen> {
                     ? const Center(child: Text("게시글이 없습니다."))
                     : RefreshIndicator(
                         onRefresh: _fetchPosts,
-                        child: ListView.separated(
-                          padding: const EdgeInsets.all(8.0),
+                        child: ListView.builder(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
                           itemCount: _posts.length,
-                          separatorBuilder: (context, index) => const Divider(),
                           itemBuilder: (context, index) {
                             final post = _posts[index];
-                            return ListTile(
-                              title: Text(post.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                              subtitle: Text(
-                                  '${post.authorUsername} · ${post.sportCategory ?? '종목무관'} · ${post.locationName ?? '지역무관'}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                              trailing: Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Chip(
-                                    label: Text(post.recruitmentStatus),
-                                    backgroundColor: post.recruitmentStatus == '모집 중' ? Colors.blue.shade100 : Colors.grey.shade300,
-                                    padding: EdgeInsets.zero,
-                                    labelPadding: const EdgeInsets.symmetric(horizontal: 8.0),
-                                    visualDensity: VisualDensity.compact,
+                            return Card(
+                              margin: const EdgeInsets.symmetric(vertical: 6.0),
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              child: InkWell(
+                                onTap: () => _navigateToPostDetail(post),
+                                borderRadius: BorderRadius.circular(10),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              post.title,
+                                              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          Chip(
+                                            label: Text(post.recruitmentStatus, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                                            backgroundColor: post.recruitmentStatus == '모집 중' ? Colors.blue.shade100 : Colors.grey.shade300,
+                                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                                            visualDensity: VisualDensity.compact,
+                                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        '${post.sportCategory ?? '종목무관'} | ${post.locationName ?? '지역무관'}',
+                                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade700),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            post.authorUsername,
+                                            style: Theme.of(context).textTheme.bodySmall,
+                                          ),
+                                          Text(
+                                            '${post.viewsCount} 조회',
+                                            style: Theme.of(context).textTheme.bodySmall,
+                                          ),
+                                        ],
+                                      )
+                                    ],
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text('${post.viewsCount} 조회', style: Theme.of(context).textTheme.bodySmall),
-                                ],
+                                ),
                               ),
-                              onTap: () => _navigateToPostDetail(post),
                             );
                           },
                         ),
@@ -209,7 +256,7 @@ class _TeamBoardScreenState extends State<TeamBoardScreen> {
           Expanded(child: _buildDropdown('상태', _selectedStatus, _recruitmentStatuses, (val) => setState(() => _selectedStatus = val!))),
           const SizedBox(width: 8),
           ElevatedButton(
-            onPressed: _fetchPosts, 
+            onPressed: _isLoading ? null : _fetchPosts, 
             child: const Icon(Icons.search),
             style: ElevatedButton.styleFrom(
               shape: const CircleBorder(),

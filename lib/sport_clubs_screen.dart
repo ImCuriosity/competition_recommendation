@@ -82,7 +82,7 @@ class _SportClubsScreenState extends State<SportClubsScreen> {
       }
     }
 
-    final uri = Uri.parse('$kBaseUrl/sport-clubs').replace(queryParameters: queryParams);
+    final uri = Uri.parse('$kBaseUrl/clubs').replace(queryParameters: queryParams);
 
     try {
       final response = await http.get(uri);

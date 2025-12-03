@@ -95,7 +95,7 @@ class _PublicSportProgramsScreenState extends State<PublicSportProgramsScreen> {
       }
     }
 
-    final uri = Uri.parse('$kBaseUrl/public-sport-programs').replace(queryParameters: queryParams);
+    final uri = Uri.parse('$kBaseUrl/public-programs').replace(queryParameters: queryParams);
 
     try {
       final response = await http.get(uri);
@@ -254,29 +254,35 @@ class _PublicSportProgramsScreenState extends State<PublicSportProgramsScreen> {
                   margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   elevation: 2,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  child: InkWell(
-                    onTap: () => _launchURL(program.homepageUrl),
-                    borderRadius: BorderRadius.circular(10),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(program.programName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(program.programName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        _buildInfoRow(Icons.business, '시설: ${program.facilityName} (${program.facilityTypeName})'),
+                        const SizedBox(height: 4),
+                        _buildInfoRow(Icons.place, '위치: ${program.location}'),
+                        const SizedBox(height: 4),
+                         _buildInfoRow(Icons.sports_soccer, '종목: ${program.sportCategory}'),
+                        const SizedBox(height: 4),
+                         _buildInfoRow(Icons.event, '기간: ${program.programBeginDate} ~ ${program.programEndDate}'),
+                         const SizedBox(height: 4),
+                         _buildInfoRow(Icons.schedule, '요일: ${program.programDay}'),
+                         const SizedBox(height: 4),
+                         _buildInfoRow(Icons.group, '대상: ${program.programTarget}'),
+                        if (program.homepageUrl != null && program.homepageUrl!.isNotEmpty) ...[
                           const SizedBox(height: 8),
-                          _buildInfoRow(Icons.business, '시설: ${program.facilityName} (${program.facilityTypeName})'),
-                          const SizedBox(height: 4),
-                          _buildInfoRow(Icons.place, '위치: ${program.location}'),
-                          const SizedBox(height: 4),
-                           _buildInfoRow(Icons.sports_soccer, '종목: ${program.sportCategory}'),
-                          const SizedBox(height: 4),
-                           _buildInfoRow(Icons.event, '기간: ${program.programBeginDate} ~ ${program.programEndDate}'),
-                           const SizedBox(height: 4),
-                           _buildInfoRow(Icons.schedule, '요일: ${program.programDay}'),
-                           const SizedBox(height: 4),
-                           _buildInfoRow(Icons.group, '대상: ${program.programTarget}'),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: OutlinedButton(
+                              onPressed: () => _launchURL(program.homepageUrl),
+                              child: const Text('홈페이지'),
+                            ),
+                          ),
                         ],
-                      ),
+                      ],
                     ),
                   ),
                 );
@@ -297,4 +303,3 @@ class _PublicSportProgramsScreenState extends State<PublicSportProgramsScreen> {
     );
   }
 }
-

@@ -37,7 +37,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // 로그인 성공 시 메인 화면으로 이동
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const CompetitionMapScreen()),
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
         );
       }
 
