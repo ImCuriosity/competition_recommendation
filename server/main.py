@@ -22,7 +22,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_KEY")
+supabase_key = os.getenv("SUPABASE_ANON_KEY")
 supabase_jwt_secret = os.getenv("SUPABASE_JWT_SECRET")
 
 SUPABASE_PAGE_SIZE = 1000
