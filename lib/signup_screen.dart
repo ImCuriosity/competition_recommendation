@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:sports_app1/main.dart'; // 💡 kProvinces, kCityCountyMap 사용을 위해 import
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -13,18 +14,22 @@ class SignupScreen extends StatefulWidget {
 }
 
 class _SignupScreenState extends State<SignupScreen> {
-  // 입력 컨트롤러
+  // 컨트롤러
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _nameController = TextEditingController();
   final _nicknameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _ageController = TextEditingController();
-  final _addressController = TextEditingController();
+  // _addressController는 드롭다운 사용으로 제거됨
 
   // 성별
   String? _selectedGender;
   final List<String> _genderOptions = ['남', '여'];
+
+  // 💡 지역 선택 상태 변수 (기본값 설정)
+  // '전체 지역'은 제외하고 실제 지역인 두 번째 항목부터 사용
+  String _selectedProvince = kProvinces.length > 1 ? kProvinces[1] : '서울특별시';
+  String _selectedCityCounty = '';
 
   // 관심 종목 데이터
   final List<String> _allSports = ['배드민턴', '마라톤', '보디빌딩', '테니스'];
@@ -34,48 +39,55 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _isLoading = false;
 
   @override
+  void initState() {
+    super.initState();
+    // 초기 시/군/구 설정 ('전체' 제외하고 첫 번째 실제 지역 선택)
+    _updateCityCountyList();
+  }
+
+  void _updateCityCountyList() {
+    final cities = kCityCountyMap[_selectedProvince]!;
+    // '전체 시/군/구'가 있다면 그 다음 항목을, 없으면 첫 번째 항목을 기본값으로
+    if (cities.length > 1 && cities.first.contains('전체')) {
+      _selectedCityCounty = cities[1];
+    } else {
+      _selectedCityCounty = cities.first;
+    }
+  }
+
+  @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _nameController.dispose();
     _nicknameController.dispose();
     _phoneController.dispose();
     _ageController.dispose();
-    _addressController.dispose();
     super.dispose();
   }
 
-  // 💡 [수정] 상세한 에러 원인을 파악하는 주소 변환 함수
+  // 주소 -> 좌표 변환
   Future<Map<String, double>?> _getCoordinatesFromAddress(String address) async {
-    final apiKey = dotenv.env['GOOGLE_MAPS_API_KEY'];
-    if (apiKey == null) throw 'API Key가 .env 파일에 없습니다.';
-
     try {
+      final apiKey = dotenv.env['GOOGLE_MAPS_API_KEY'];
+      if (apiKey == null) throw 'API Key not found';
+
       final url = Uri.parse(
           'https://maps.googleapis.com/maps/api/geocode/json?address=$address&key=$apiKey&language=ko');
 
       final response = await http.get(url);
       final data = json.decode(response.body);
-      final status = data['status'];
 
-      if (status == 'OK') {
+      if (data['status'] == 'OK') {
         final location = data['results'][0]['geometry']['location'];
-        return {'lat': location['lat'], 'lng': location['lng']};
-      } else {
-        // 🚨 실패 원인별 에러 메시지 생성
-        String errorMessage = '주소 변환 실패 ($status)';
-        if (status == 'ZERO_RESULTS') errorMessage = '해당 주소를 지도에서 찾을 수 없습니다. (도로명 주소 권장)';
-        if (status == 'REQUEST_DENIED') errorMessage = 'API 권한 오류: Google Cloud에서 Geocoding API를 켜주세요.';
-        if (status == 'OVER_QUERY_LIMIT') errorMessage = 'API 사용량 초과 (결제 계정 확인 필요)';
-
-        debugPrint('Geocoding Error Details: ${data['error_message']}');
-        throw errorMessage;
+        return {
+          'lat': location['lat'],
+          'lng': location['lng'],
+        };
       }
     } catch (e) {
-      if (e is String) rethrow; // 위에서 던진 메시지 그대로 전달
-      debugPrint('Geocoding Exception: $e');
-      throw '네트워크 오류 또는 주소 변환 실패';
+      debugPrint('Geocoding Error: $e');
     }
+    return null;
   }
 
   // 실력 선택 다이얼로그
@@ -109,13 +121,12 @@ class _SignupScreenState extends State<SignupScreen> {
 
   // 회원가입 로직
   Future<void> _signUp() async {
+    // 유효성 검사
     if (_emailController.text.isEmpty ||
         _passwordController.text.isEmpty ||
-        _nameController.text.isEmpty ||
         _nicknameController.text.isEmpty ||
         _phoneController.text.isEmpty ||
         _ageController.text.isEmpty ||
-        _addressController.text.isEmpty ||
         _selectedGender == null) {
       _showSnackBar('모든 정보를 입력해주세요.', isError: true);
       return;
@@ -124,15 +135,14 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 1. 주소로 좌표 구하기 (에러 발생 시 catch 블록으로 이동하여 상세 사유 표시)
-      final coords = await _getCoordinatesFromAddress(_addressController.text.trim());
+      // 💡 드롭다운으로 선택된 주소 조합
+      final fullAddress = '$_selectedProvince $_selectedCityCounty';
 
-      // 혹시 null이 반환되더라도 안전하게 처리 (위 함수에서 throw 하므로 도달할 일은 거의 없음)
+      final coords = await _getCoordinatesFromAddress(fullAddress);
       if (coords == null) {
-        throw '좌표를 가져올 수 없습니다.';
+        throw '선택하신 지역의 좌표를 가져올 수 없습니다.';
       }
 
-      // 2. Supabase Auth 가입
       final AuthResponse res = await Supabase.instance.client.auth.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
@@ -141,26 +151,25 @@ class _SignupScreenState extends State<SignupScreen> {
       final User? user = res.user;
       if (user == null) throw '회원가입 실패 (User is null)';
 
-      // 3. 프로필 저장 (profiles 테이블)
+      // DB 저장
       await Supabase.instance.client.rpc('create_user_profile', params: {
         '_id': user.id,
-        '_name': _nameController.text.trim(),
+        '_name': '', // 이름 필드 없음
         '_nickname': _nicknameController.text.trim(),
         '_phone': _phoneController.text.trim(),
         '_age': int.parse(_ageController.text.trim()),
         '_gender': _selectedGender,
-        '_address': _addressController.text.trim(),
+        '_address': fullAddress, // 💡 조합된 주소 저장
         '_lat': coords['lat'],
         '_lng': coords['lng'],
       });
 
-      // 4. 관심 종목 저장 (interesting_sports 테이블)
       if (_selectedSports.isNotEmpty) {
         final List<Map<String, dynamic>> sportsData = _selectedSports.entries.map((entry) {
           return {
             'user_id': user.id,
-            'sport_name': entry.key, // DB 컬럼명 확인 (sport_name)
-            'skill': entry.value,    // DB 컬럼명 확인 (skill)
+            'sport_name': entry.key,
+            'skill': entry.value,
           };
         }).toList();
 
@@ -175,7 +184,6 @@ class _SignupScreenState extends State<SignupScreen> {
     } on AuthException catch (e) {
       _showSnackBar(e.message, isError: true);
     } catch (e) {
-      // 💡 상세 에러 메시지를 화면에 표시
       _showSnackBar('오류 발생: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -188,13 +196,49 @@ class _SignupScreenState extends State<SignupScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: isError ? Colors.red : Colors.green,
-        duration: const Duration(seconds: 4), // 에러 메시지를 읽을 수 있도록 시간 연장
       ),
+    );
+  }
+
+  // 💡 드롭다운 빌더 위젯
+  Widget _buildDropdown(String label, String value, List<String> items, ValueChanged<String?> onChanged) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4.0, bottom: 4.0),
+          child: Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: value,
+              isExpanded: true,
+              onChanged: onChanged,
+              items: items.map<DropdownMenuItem<String>>((String item) {
+                return DropdownMenuItem<String>(
+                  value: item,
+                  child: Text(item),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // '전체 지역', '전체 시/군/구'를 제외한 리스트 생성
+    final provinceList = kProvinces.where((p) => !p.contains('전체')).toList();
+    final cityList = kCityCountyMap[_selectedProvince]!.where((c) => !c.contains('전체')).toList();
+
     return Scaffold(
       appBar: AppBar(title: const Text('회원가입')),
       body: SafeArea(
@@ -210,13 +254,11 @@ class _SignupScreenState extends State<SignupScreen> {
               _buildTextField(_passwordController, '비밀번호 (6자리 이상)', Icons.lock, isObscure: true),
               const SizedBox(height: 20),
 
-              // 한글 입력 최적화 (text 타입)
-              _buildTextField(_nameController, '이름 (실명)', Icons.person, type: TextInputType.text),
-              const SizedBox(height: 10),
+              // 이름 입력 없음
+
               _buildTextField(_nicknameController, '닉네임', Icons.face, type: TextInputType.text),
               const SizedBox(height: 10),
 
-              // 전화번호 숫자 키패드 및 포맷터 적용
               _buildTextField(
                   _phoneController,
                   '전화번호',
@@ -234,18 +276,61 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _selectedGender,
-                      hint: const Text('성별'),
-                      decoration: _inputDeco(Icons.wc),
-                      items: _genderOptions.map((val) => DropdownMenuItem(value: val, child: Text(val))).toList(),
-                      onChanged: (val) => setState(() => _selectedGender = val),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4.0, bottom: 4.0),
+                          child: Text('성별', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _selectedGender,
+                              isExpanded: true,
+                              hint: const Text('선택'),
+                              items: _genderOptions.map((val) => DropdownMenuItem(value: val, child: Text(val))).toList(),
+                              onChanged: (val) => setState(() => _selectedGender = val),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              _buildTextField(_addressController, '활동 지역 (예: 서울시 강남구 역삼동)', Icons.location_on, type: TextInputType.text),
+              const SizedBox(height: 20),
+
+              // 💡 주소 입력: 드롭다운 방식
+              const Text('활동 지역', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 5),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildDropdown('시/도', _selectedProvince, provinceList, (val) {
+                      setState(() {
+                        _selectedProvince = val!;
+                        // 시/도가 바뀌면 하위 지역 목록 갱신 및 첫 번째 값 선택
+                        final newCities = kCityCountyMap[val]!.where((c) => !c.contains('전체')).toList();
+                        _selectedCityCounty = newCities.first;
+                      });
+                    }),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _buildDropdown('시/군/구', _selectedCityCounty, cityList, (val) {
+                      setState(() {
+                        _selectedCityCounty = val!;
+                      });
+                    }),
+                  ),
+                ],
+              ),
 
               const SizedBox(height: 30),
               const Text('관심 종목', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -294,22 +379,28 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Widget _buildTextField(TextEditingController controller, String hint, IconData icon,
       {bool isObscure = false, TextInputType? type, List<TextInputFormatter>? formatter}) {
-    return TextField(
-      controller: controller,
-      obscureText: isObscure,
-      keyboardType: type ?? TextInputType.text,
-      inputFormatters: formatter,
-      autocorrect: false, // 한글 입력 오류 방지
-      enableSuggestions: false, // 한글 입력 오류 방지
-      decoration: _inputDeco(icon).copyWith(labelText: hint),
-    );
-  }
-
-  InputDecoration _inputDeco(IconData icon) {
-    return InputDecoration(
-      prefixIcon: Icon(icon),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4.0, bottom: 4.0),
+          child: Text(hint, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+        ),
+        TextField(
+          controller: controller,
+          obscureText: isObscure,
+          keyboardType: type ?? TextInputType.text,
+          inputFormatters: formatter,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: InputDecoration(
+            prefixIcon: Icon(icon),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
+            hintText: '$hint 입력',
+          ),
+        ),
+      ],
     );
   }
 }
@@ -319,7 +410,6 @@ class _PhoneNumberFormatter extends TextInputFormatter {
   TextEditingValue formatEditUpdate(
       TextEditingValue oldValue, TextEditingValue newValue) {
 
-    // 숫자만 추출
     final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
 
     if (digits.length > 11) {
