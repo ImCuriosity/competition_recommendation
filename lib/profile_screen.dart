@@ -246,11 +246,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   TextFormField(
                     controller: _addressController,
                     decoration: _inputDeco('예: 서울시 강남구').copyWith(
-                      helperText: '주소를 변경하면 좌표가 자동 갱신됩니다.',
+                      helperText: '주소를 변경하면 변경된 주소로 서비스가 제공됩니다.',
                     ),
                   ),
                   const SizedBox(height: 30),
-                  _buildLabel('관심 종목 (선택 시 실력 변경)'),
+                  _buildLabel('관심 종목'),
                   Wrap(
                     spacing: 8.0,
                     children: _allSports.map((sport) {
