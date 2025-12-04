@@ -366,7 +366,7 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
     // ✅ 2. 쿼리 파라미터에 top_n_per_sport 추가
     final uri = Uri.parse('$kBaseUrl/recommend/competitions').replace(
         queryParameters: {
-          'top_n_per_sport': topN.toString(),
+          'top_n': topN.toString(),
           'user_id': userId, // ✅ user_id 추가
         }
     );
