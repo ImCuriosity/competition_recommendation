@@ -119,6 +119,8 @@ const Map<String, List<String>> kCityCountyMap = {
 };
 const LatLng kInitialCameraPosition = LatLng(37.5665, 126.9780);
 
+// ✅ 마감 임박 임계값 상수 추가
+const int kDeadlineThresholdDays = 5;
 // ----------------------------------------------------
 // App Entry Point
 // ----------------------------------------------------
@@ -370,7 +372,6 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
           'user_id': userId, // ✅ user_id 추가
         }
     );
-    print('AI 추천 API 호출 URL: $uri'); // <--- 이 부분을 추가하여 확인
 
     try {
       final response = await http.get(uri, headers: {
@@ -469,12 +470,34 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
     }
   }
 
+  // ✅ 마감 임박 마커 색상 결정 로직 추가
+  BitmapDescriptor _getMarkerColor(Competition comp) {
+    try {
+      final deadline = DateTime.parse(comp.registerDeadline);
+      final now = DateTime.now();
+      final difference = deadline.difference(now).inDays;
+
+      // 마감일이 현재 날짜보다 나중이면서 (아직 마감 전)
+      // 7일 이내라면 빨간색 마커 사용
+      if (difference >= 0 && difference <= kDeadlineThresholdDays) {
+        // 마감 임박 (빨간색)
+        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
+      }
+    } catch (e) {
+      // 날짜 파싱 오류 발생 시 기본값 사용
+    }
+
+    // 기본값 (주황색)
+    return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+  }
+
   void _updateMapMarkers() {
     final Set<Marker> newMarkers = {};
     for (var comp in _competitions) {
       newMarkers.add(Marker(
         markerId: MarkerId(comp.id),
         position: comp.latLng,
+        icon: _getMarkerColor(comp),
         onTap: () => _showCompetitionDetails(comp),
       ));
     }
@@ -822,6 +845,61 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
               ),
             ),
           ),
+          Positioned(
+            bottom: 17,
+            left: 210,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300)
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('마커 범례', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  SizedBox(height: 5),
+                  // 빨간색 마커 설명
+                  _LegendItem(color: Colors.red, text: '마감 임박 (5일 이내)'),
+                  // 노란색 마커 설명
+                  _LegendItem(color: Colors.orange, text: '일반 대회'),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ✅ 범례 항목을 위한 보조 위젯 (CompetitionMapScreenState 클래스 외부에 추가)
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final String text;
+
+  const _LegendItem({required this.color, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Row(
+        children: [
+          // 작은 색상 박스로 색상 표시
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.black, width: 0.5),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(text, style: const TextStyle(fontSize: 12)),
+
         ],
       ),
     );
