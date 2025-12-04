@@ -24,7 +24,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
   // 성별
   String? _selectedGender;
-  final List<String> _genderOptions = ['남', '여ㅁㄴㄷ'];
+  final List<String> _genderOptions = ['남', '여'];
 
   // 관심 종목 데이터
   final List<String> _allSports = ['배드민턴', '마라톤', '보디빌딩', '테니스'];
