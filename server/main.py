@@ -261,9 +261,26 @@ async def search_competitions(sport_category: Optional[SportCategory] = None, pr
         if province and province != '전체 지역':
             query = query.eq("location_province_city", province)
             if city_county and city_county != '전체 시/군/구': query = query.eq("location_county_district", city_county)
+            
         all_data = await fetch_paginated_data(query)
         processed = [p for item in all_data if (p := process_competition_data(item, available_from))]
-        return {"success": True, "count": len(processed), "data": processed}
+        
+        # 🌟 [수정 로직 시작] title 중복 제거 및 첫 번째 등장 행 유지 🌟
+        seen_titles = set()
+        unique_competitions = []
+        
+        for item in processed:
+            title = item.get('title')
+            
+            # title이 있고, 이전에 처리된 적이 없는 경우에만 리스트에 추가
+            if title and title not in seen_titles:
+                seen_titles.add(title)
+                unique_competitions.append(item)
+        
+        # 'count'와 'data'에 중복이 제거된 고유 대회 목록을 사용
+        return {"success": True, "count": len(unique_competitions), "data": unique_competitions}
+        # 🌟 [수정 로직 끝] 🌟
+
     except Exception as e: raise HTTPException(500, f"대회 검색 오류: {e}")
 
 # ✅ [복원] 공공 체육 프로그램 검색 엔드포인트
@@ -373,6 +390,8 @@ async def recommend_competitions(current_user_id: str = Depends(get_current_user
         user_sports_map = {s['sport_name']: s['skill'] for s in user_profile.get('interesting_sports', [])}
         if not user_sports_map: return {"success": True, "count": 0, "message": "관심 종목 없음"}
         all_competitions = await fetch_paginated_data(supabase.table("competitions").select("*"))
+        
+        # 1. 모든 대회를 순회하며 점수 계산 및 종목별로 그룹화
         scored_competitions_by_sport: Dict[str, List[Dict[str, Any]]] = {s: [] for s in user_sports_map}
         available_from = datetime.date.today().isoformat()
         for comp in all_competitions:
@@ -382,7 +401,31 @@ async def recommend_competitions(current_user_id: str = Depends(get_current_user
             if score > 0 and proc_comp.get("sport_category") in scored_competitions_by_sport:
                 proc_comp.update({'recommendation_score': score, 'skill_similarity': skill_s, 'location_similarity': loc_s})
                 scored_competitions_by_sport[proc_comp["sport_category"]].append(proc_comp)
-        final_recs = {s: sorted(c, key=lambda x: x['recommendation_score'], reverse=True)[:top_n] for s, c in scored_competitions_by_sport.items()}
+
+        # 🌟 [수정 로직 시작] title 중복 제거 및 최고 점수 항목 유지 🌟
+        unique_scored_competitions = {} 
+        
+        for sport, scored_list in scored_competitions_by_sport.items():
+            best_by_title: Dict[str, Dict[str, Any]] = {}
+            for comp in scored_list:
+                title = comp.get('title')
+                score = comp.get('recommendation_score', 0.0)
+                
+                # 해당 title이 처음 등장하거나, 현재 점수가 기존 최고 점수보다 높으면 업데이트
+                if title and (title not in best_by_title or score > best_by_title[title]['recommendation_score']):
+                    best_by_title[title] = comp
+            
+            # 종목별로 중복이 제거된 리스트를 다시 할당
+            unique_scored_competitions[sport] = list(best_by_title.values())
+
+        # 🌟 [수정 로직 끝] 🌟
+        
+        # 2. 중복이 제거된 리스트를 점수 순으로 정렬하고 top_n을 선택
+        final_recs = {
+            s: sorted(c, key=lambda x: x['recommendation_score'], reverse=True)[:top_n] 
+            for s, c in unique_scored_competitions.items()
+        }
+        
         total_count = sum(len(v) for v in final_recs.values())
         return {"success": True, "count": total_count, "recommended_by_sport": final_recs}
     except Exception as e: raise HTTPException(500, f"AI 추천 오류: {e}")
