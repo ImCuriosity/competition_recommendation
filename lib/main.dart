@@ -256,6 +256,7 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
   String _selectedCityCounty = '전체 시/군/구';
   DateTime? _selectedDate;
   LatLng _userCurrentLocation = kInitialCameraPosition;
+  bool _isSearchPanelCollapsed = false;
 
   @override
   void initState() {
@@ -764,7 +765,7 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
             },
             markers: _markers,
             myLocationEnabled: true,
-            padding: const EdgeInsets.only(top: 260),
+            padding: EdgeInsets.only(top: _isSearchPanelCollapsed ? 60 : 290),
           ),
           if (_isLoading) const Center(child: CircularProgressIndicator()),
           Positioned(
@@ -779,83 +780,107 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
                 ],
               ),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(child: _buildDropdown(
-                          '종목', _selectedCategory, kSportCategories, (v) =>
-                          setState(() => _selectedCategory = v!))),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      const Padding(
+                        padding: EdgeInsets.only(left: 8.0),
+                        child: Text('대회 검색 필터', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ),
+                      IconButton(
+                        icon: Icon(_isSearchPanelCollapsed ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up),
+                        onPressed: () {
+                          setState(() {
+                            _isSearchPanelCollapsed = !_isSearchPanelCollapsed;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  if (!_isSearchPanelCollapsed)
+                    Column(
+                      children: [
+                        const SizedBox(height: 10),
+                        Row(
                           children: [
-                            const Padding(padding: EdgeInsets.only(left: 8.0),
-                                child: Text('기간', style: TextStyle(
-                                    fontSize: 12, color: Colors.grey))),
-                            TextButton.icon(
-                              onPressed: () => _selectDate(context),
-                              icon: const Icon(Icons.calendar_today, size: 16),
-                              label: Text(
-                                  _selectedDate == null ? '날짜 선택' : DateFormat(
-                                      'yy/MM/dd').format(_selectedDate!),
-                                  style: const TextStyle(fontSize: 14)),
-                              style: TextButton.styleFrom(
-                                  padding: EdgeInsets.zero,
-                                  alignment: Alignment.centerLeft),
+                            Expanded(child: _buildDropdown(
+                                '종목', _selectedCategory, kSportCategories, (v) =>
+                                setState(() => _selectedCategory = v!))),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Padding(padding: EdgeInsets.only(left: 8.0),
+                                      child: Text('기간', style: TextStyle(
+                                          fontSize: 12, color: Colors.grey))),
+                                  TextButton.icon(
+                                    onPressed: () => _selectDate(context),
+                                    icon: const Icon(Icons.calendar_today, size: 16),
+                                    label: Text(
+                                        _selectedDate == null ? '날짜 선택' : DateFormat(
+                                            'yy/MM/dd').format(_selectedDate!),
+                                        style: const TextStyle(fontSize: 14)),
+                                    style: TextButton.styleFrom(
+                                        padding: EdgeInsets.zero,
+                                        alignment: Alignment.centerLeft),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(child: _buildDropdown(
-                          '시/도', _selectedProvince, kProvinces, (v) =>
-                          setState(() {
-                            _selectedProvince = v!;
-                            _selectedCityCounty = kCityCountyMap[v]!.first;
-                          }))),
-                      Expanded(child: _buildDropdown(
-                          '시/군/구', _selectedCityCounty,
-                          kCityCountyMap[_selectedProvince]!, (v) =>
-                          setState(() => _selectedCityCounty = v!))),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _isLoading ? null : () =>
-                          _fetchCompetitions(isInitial: false),
-                      icon: const Icon(Icons.search),
-                      label: const Text(
-                          '대회 검색', style: TextStyle(fontSize: 16)),
-                      style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          backgroundColor: Colors.blue,
-                          foregroundColor: Colors.white),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(child: _buildDropdown(
+                                '시/도', _selectedProvince, kProvinces, (v) =>
+                                setState(() {
+                                  _selectedProvince = v!;
+                                  _selectedCityCounty = kCityCountyMap[v]!.first;
+                                }))),
+                            Expanded(child: _buildDropdown(
+                                '시/군/구', _selectedCityCounty,
+                                kCityCountyMap[_selectedProvince]!, (v) =>
+                                setState(() => _selectedCityCounty = v!))),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: _isLoading ? null : () =>
+                                _fetchCompetitions(isInitial: false),
+                            icon: const Icon(Icons.search),
+                            label: const Text(
+                                '대회 검색', style: TextStyle(fontSize: 16)),
+                            style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: _isLoading ? null : _fetchAiRecommendations,
+                            icon: const Icon(Icons.smart_toy_outlined, size: 20),
+                            label: const Text('AI 맞춤 대회 추천 받기', style: TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFFEE135),
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 15),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              elevation: 3,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _isLoading ? null : _fetchAiRecommendations,
-                      icon: const Icon(Icons.smart_toy_outlined, size: 20),
-                      label: const Text('AI 맞춤 대회 추천 받기', style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFEE135),
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                        elevation: 3,
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
