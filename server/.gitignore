@@ -19,5 +19,4 @@ __pycache__/
 *.log
 .DS_Store
 
-.dockerfileignore
 Dockerfile

@@ -94,7 +94,7 @@ class Competition {
   }
 }
 
-const String kBaseUrl = "http://10.0.2.2:8080";
+const String kBaseUrl = "https://sports-api-254427467650.asia-northeast3.run.app";
 const List<String> kSportCategories = ['전체 종목', '배드민턴', '마라톤', '보디빌딩', '테니스'];
 const List<String> kProvinces = ['전체 지역', '서울특별시', '부산광역시', '대구광역시', '인천광역시', '광주광역시', '대전광역시', '울산광역시', '세종특별자치시', '경기도', '강원특별자치도', '충청북도', '충청남도', '전북특별자치도', '전라남도', '경상북도', '경상남도', '제주특별자치도'];
 const Map<String, List<String>> kCityCountyMap = {

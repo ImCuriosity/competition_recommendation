@@ -1,6 +1,9 @@
-pandas==2.3.3
-fastapi==0.121.3
-uvicorn==0.38.0
-supabase==2.24.0
-python-dotenv==1.2.1
-shapely==2.1.2
+pandas>=2.0.0
+fastapi
+uvicorn[standard]
+supabase
+python-dotenv
+shapely
+PyJWT
+pydantic
+requests
