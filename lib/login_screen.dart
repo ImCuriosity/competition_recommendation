@@ -86,11 +86,12 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(
-                  Icons.sports_basketball,
-                  size: 72,
-                  color: Colors.blueAccent,
+                Image.asset(
+                  'assets/home_logo.png',
+                  height: 72,
                 ),
+                const Text("우리 동네 체육대회",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 30),
 
                 TextField(

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:sports_app1/main.dart'; // For kBaseUrl, kSportCategories
+import 'package:sports_app1/main.dart'; // For kBaseUrl, kSportCategories, kProvinces, kCityCountyMap
+import 'package:sports_app1/team_board_screen.dart'; // For TeamBoardPost
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class TeamBoardCreateScreen extends StatefulWidget {
-  const TeamBoardCreateScreen({super.key});
+  final TeamBoardPost? postToEdit;
+
+  const TeamBoardCreateScreen({super.key, this.postToEdit});
 
   @override
   State<TeamBoardCreateScreen> createState() => _TeamBoardCreateScreenState();
@@ -13,18 +16,42 @@ class TeamBoardCreateScreen extends StatefulWidget {
 
 class _TeamBoardCreateScreenState extends State<TeamBoardCreateScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _contentController = TextEditingController();
-  final _locationController = TextEditingController();
-  final _maxMembersController = TextEditingController();
+  late TextEditingController _titleController;
+  late TextEditingController _contentController;
+  late TextEditingController _maxMembersController;
 
   String? _selectedCategory;
-  String _selectedStatus = '모집 중';
+  String? _selectedProvince;
+  String? _selectedCityCounty;
   String? _selectedSkillLevel;
+  String _selectedStatus = '모집 중';
   bool _isLoading = false;
 
-  final List<String> _recruitmentStatuses = ['모집 중', '모집 완료'];
   final List<String> _skillLevels = ['누구나', '초급', '중급', '고급'];
+  final List<String> _recruitmentStatuses = ['모집 중', '모집 완료'];
+
+  bool get _isEditMode => widget.postToEdit != null;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final post = widget.postToEdit;
+    _titleController = TextEditingController(text: post?.title);
+    _contentController = TextEditingController(text: post?.content);
+    _maxMembersController = TextEditingController(text: post?.maxMemberCount?.toString() ?? '');
+    _selectedCategory = post?.sportCategory;
+    _selectedSkillLevel = post?.requiredSkillLevel;
+    _selectedStatus = post?.recruitmentStatus ?? '모집 중';
+
+    if (post?.locationName != null && post!.locationName!.split(' ').length > 1) {
+      _selectedProvince = post.locationName!.split(' ')[0];
+      _selectedCityCounty = post.locationName!.split(' ').sublist(1).join(' ');
+    } else {
+      _selectedProvince = kProvinces.first;
+      _selectedCityCounty = kCityCountyMap[_selectedProvince]?.first;
+    }
+  }
 
   Future<void> _submitPost() async {
     if (!_formKey.currentState!.validate()) {
@@ -39,34 +66,48 @@ class _TeamBoardCreateScreenState extends State<TeamBoardCreateScreen> {
 
     setState(() => _isLoading = true);
 
+    final location = '$_selectedProvince $_selectedCityCounty';
+
     final body = json.encode({
       'title': _titleController.text,
       'content': _contentController.text,
       'sport_category': _selectedCategory,
-      'location_name': _locationController.text,
+      'location_name': location,
       'recruitment_status': _selectedStatus,
       'required_skill_level': _selectedSkillLevel,
       'max_member_count': int.tryParse(_maxMembersController.text),
     });
 
     try {
-      final response = await http.post(
-        Uri.parse('$kBaseUrl/team-board'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${session.accessToken}', 
-        },
-        body: body,
-      );
+      http.Response response;
+      if (_isEditMode) {
+        response = await http.put(
+          Uri.parse('$kBaseUrl/team-board/${widget.postToEdit!.id}'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ${session.accessToken}',
+          },
+          body: body,
+        );
+      } else {
+        response = await http.post(
+          Uri.parse('$kBaseUrl/team-board'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ${session.accessToken}',
+          },
+          body: body,
+        );
+      }
 
       if (response.statusCode == 200) {
-        _showSnackBar('게시글이 성공적으로 등록되었습니다.');
+        _showSnackBar(_isEditMode ? '게시글이 성공적으로 수정되었습니다.' : '게시글이 성공적으로 등록되었습니다.');
         if (mounted) {
           Navigator.of(context).pop(true);
         }
       } else {
         final errorData = json.decode(utf8.decode(response.bodyBytes));
-        _showSnackBar(errorData['detail'] ?? '게시글 등록에 실패했습니다.');
+        _showSnackBar(errorData['detail'] ?? (_isEditMode ? '게시글 수정에 실패했습니다.' : '게시글 등록에 실패했습니다.'));
       }
     } catch (e) {
       _showSnackBar('네트워크 오류: $e');
@@ -87,7 +128,6 @@ class _TeamBoardCreateScreenState extends State<TeamBoardCreateScreen> {
   void dispose() {
     _titleController.dispose();
     _contentController.dispose();
-    _locationController.dispose();
     _maxMembersController.dispose();
     super.dispose();
   }
@@ -96,7 +136,7 @@ class _TeamBoardCreateScreenState extends State<TeamBoardCreateScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('팀원 모집 글쓰기'),
+        title: Text(_isEditMode ? '게시글 수정' : '팀원 모집 글쓰기'),
       ),
       body: Form(
         key: _formKey,
@@ -117,7 +157,32 @@ class _TeamBoardCreateScreenState extends State<TeamBoardCreateScreen> {
               const SizedBox(height: 16),
               _buildTextFormField(_contentController, '내용', '내용을 입력하세요.', maxLines: 5),
               const SizedBox(height: 16),
-              _buildTextFormField(_locationController, '활동 지역', '예: 서울시 강남구'),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildDropdownButtonFormField(
+                      value: _selectedProvince,
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedProvince = value;
+                          _selectedCityCounty = kCityCountyMap[value]?.first;
+                        });
+                      },
+                      items: kProvinces,
+                      labelText: '시/도',
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildDropdownButtonFormField(
+                      value: _selectedCityCounty,
+                      onChanged: (value) => setState(() => _selectedCityCounty = value),
+                      items: _selectedProvince != null ? kCityCountyMap[_selectedProvince]! : [],
+                      labelText: '시/군/구',
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 16),
               _buildDropdownButtonFormField(
                 value: _selectedSkillLevel,
@@ -127,7 +192,22 @@ class _TeamBoardCreateScreenState extends State<TeamBoardCreateScreen> {
                 hintText: '실력 수준을 선택하세요',
               ),
               const SizedBox(height: 16),
-              _buildTextFormField(_maxMembersController, '최대 인원', '숫자만 입력', keyboardType: TextInputType.number),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildTextFormField(_maxMembersController, '최대 인원', '숫자만 입력', keyboardType: TextInputType.number),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildDropdownButtonFormField(
+                      value: _selectedStatus,
+                      onChanged: (value) => setState(() => _selectedStatus = value!),
+                      items: _recruitmentStatuses,
+                      labelText: '모집 상태',
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: _isLoading ? null : _submitPost,
@@ -136,7 +216,7 @@ class _TeamBoardCreateScreenState extends State<TeamBoardCreateScreen> {
                 ),
                 child: _isLoading
                     ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('등록하기', style: TextStyle(fontSize: 16)),
+                    : Text(_isEditMode ? '수정하기' : '등록하기', style: const TextStyle(fontSize: 16)),
               ),
             ],
           ),

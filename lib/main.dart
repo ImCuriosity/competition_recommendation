@@ -322,7 +322,15 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
   }
 
   Future<void> _fetchCompetitions({bool isInitial = false}) async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      if (isInitial) {
+        _selectedCategory = kSportCategories.first;
+        _selectedProvince = kProvinces.first;
+        _selectedCityCounty = kCityCountyMap[_selectedProvince]!.first;
+        _selectedDate = null;
+      }
+    });
 
     final Map<String, dynamic> queryParams = {};
     if (!isInitial) {
@@ -718,13 +726,20 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: GestureDetector(
+          onTap: () => _fetchCompetitions(isInitial: true),
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Image.asset('assets/main_logo.png'),
+          ),
+        ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('🏆 체육 대회 검색',
+            const Text('우리 동네 체육대회',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             if (Supabase.instance.client.auth.currentUser != null)
-              Text('ID: ${Supabase.instance.client.auth.currentUser!.id}',
+              Text('Email: ${Supabase.instance.client.auth.currentUser!.email}',
                   style: const TextStyle(fontSize: 10, color: Colors.white70)),
           ],
         ),

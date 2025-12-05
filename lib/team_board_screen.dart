@@ -22,6 +22,7 @@ class TeamBoardPost {
   final int viewsCount;
   final DateTime createdAt;
   final String authorUsername;
+  final String? authorId;
 
   TeamBoardPost({
     required this.id,
@@ -36,6 +37,7 @@ class TeamBoardPost {
     required this.viewsCount,
     required this.createdAt,
     required this.authorUsername,
+    this.authorId,
   });
 
   factory TeamBoardPost.fromJson(Map<String, dynamic> json) {
@@ -51,7 +53,8 @@ class TeamBoardPost {
       maxMemberCount: json['max_member_count'],
       viewsCount: json['views_count'] ?? 0,
       createdAt: DateTime.parse(json['created_at']),
-      authorUsername: json['profiles']?['nickname'] ?? '익명', // BUG FIX: username -> nickname
+      authorUsername: json['profiles']?['nickname'] ?? '익명',
+      authorId: json['user_id'], // ✅ 수정: authorId를 user_id에서 직접 가져옵니다.
     );
   }
 }
@@ -132,7 +135,7 @@ class _TeamBoardScreenState extends State<TeamBoardScreen> {
       MaterialPageRoute(
         builder: (context) => TeamBoardDetailScreen(postId: post.id),
       ),
-    ).then((_) => _fetchPosts()); // 상세 페이지에서 돌아왔을 때 목록 새로고침
+    ).then((_) => _fetchPosts());
   }
 
   void _navigateToCreatePost() async {

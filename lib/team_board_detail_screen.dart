@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:sports_app1/main.dart'; // For kBaseUrl
+import 'package:sports_app1/team_board_create_screen.dart';
 import 'package:sports_app1/team_board_screen.dart'; // For TeamBoardPost
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -52,6 +53,8 @@ class _TeamBoardDetailScreenState extends State<TeamBoardDetailScreen> {
   List<Reply> _replies = [];
   String? _error;
   final _replyController = TextEditingController();
+
+  String? get _currentUserId => Supabase.instance.client.auth.currentUser?.id;
 
   @override
   void initState() {
@@ -146,6 +149,68 @@ class _TeamBoardDetailScreenState extends State<TeamBoardDetailScreen> {
     }
   }
 
+  Future<void> _navigateToEditScreen() async {
+    if (_post == null) return;
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TeamBoardCreateScreen(postToEdit: _post!),
+      ),
+    );
+
+    if (result == true) {
+      _fetchPostDetails();
+    }
+  }
+
+  Future<void> _deletePost() async {
+    if (_post == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('게시글 삭제'),
+        content: const Text('정말로 이 게시글을 삭제하시겠습니까?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('삭제', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      _showSnackBar('인증 정보가 없습니다.');
+      return;
+    }
+
+    try {
+      final response = await http.delete(
+        Uri.parse('$kBaseUrl/team-board/${_post!.id}'),
+        headers: {
+          'Authorization': 'Bearer ${session.accessToken}',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        _showSnackBar('게시글이 삭제되었습니다.');
+        if (mounted) {
+          Navigator.of(context).pop(true);
+        }
+      } else {
+        final errorData = json.decode(utf8.decode(response.bodyBytes));
+        _showSnackBar(errorData['detail'] ?? '게시글 삭제에 실패했습니다.');
+      }
+    } catch (e) {
+      _showSnackBar('네트워크 오류: $e');
+    }
+  }
+
   @override
   void dispose() {
     _replyController.dispose();
@@ -154,8 +219,18 @@ class _TeamBoardDetailScreenState extends State<TeamBoardDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isAuthor = _post?.authorId != null && _post!.authorId == _currentUserId;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('게시글 상세')),
+      appBar: AppBar(
+        title: const Text('게시글 상세'),
+        actions: isAuthor
+            ? [
+                IconButton(icon: const Icon(Icons.edit), onPressed: _navigateToEditScreen, tooltip: '수정'),
+                IconButton(icon: const Icon(Icons.delete), onPressed: _deletePost, tooltip: '삭제'),
+              ]
+            : null,
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null

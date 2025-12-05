@@ -37,9 +37,9 @@ SKILL_RANK = {"상": 3, "중": 2, "하": 1, "무관": 0}
 # ====================================================
 
 app = FastAPI(
-    title="Sports Competition API (V2.2 - JWT Auth)",
-    description="운동 대회 검색, AI 추천, 게시판 API (JWT 인증 적용)",
-    version="2.2.0"
+    title="Sports Competition API (V2.3 - Edit/Delete)",
+    description="운동 대회 검색, AI 추천, 게시판 API (수정/삭제 기능 추가)",
+    version="2.3.0"
 )
 
 # 익명 클라이언트 (공개 데이터 조회용)
@@ -54,6 +54,15 @@ if supabase_url and supabase_key:
 # ====================================================
 # Pydantic 모델
 # ====================================================
+
+class TeamBoardUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    sport_category: Optional[str] = None
+    location_name: Optional[str] = None
+    recruitment_status: Optional[str] = None
+    required_skill_level: Optional[str] = None
+    max_member_count: Optional[int] = None
 
 class TeamBoardCreate(BaseModel):
     title: str
@@ -79,7 +88,7 @@ GRADE_SKILL_MAP: Dict[SportCategory, Dict[str, List[str]]] = {
     SportCategory.테니스: {
         "상": ["챌린저부", "마스터스부", "지도자부", "개나리부", "국화부", "통합부", "마스터스", "챌린저"],
         "중": ["전국신인부", "남자오픈부", "여자퓨처스부", "남자퓨처스부", "세미오픈부", "베테랑부", "오픈부", "신인부", "썸머부", "무궁화부", "랭킹부", "퓨처스부"],
-        "하": ["남자테린이부", "여자테린이부", "지역 신인부", "입문부", "테린이", "초심부", "루키부", "신인"],
+        "하": ["남자테린이부", "여자테린이부", "지역 신인부", "입문부", "테린이", "초심", "루키", "신인"],
         "무관": ["무관", "", "전부"],
     },
     SportCategory.보디빌딩: {"상": ["마스터즈", "시니어", "오픈", "프로", "엘리트", "오버롤", "마스터"], "중": ["주니어", "미들", "일반부", "학생부"], "하": ["루키", "노비스", "비기너", "초심"], "무관": ["무관", ""]},
@@ -109,7 +118,6 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
         raise HTTPException(500, "JWT 시크릿 설정 없음")
         
     try:
-        # ✅ 여기에 audience="authenticated"를 꼭 넣어줘야 합니다!
         payload = jwt.decode(
             token, 
             supabase_jwt_secret, 
@@ -126,35 +134,13 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
     except jwt.ExpiredSignatureError: 
         raise HTTPException(401, "토큰 만료")
     except (jwt.PyJWTError, Exception) as e:
-        print(f"DEBUG Error: {e}") # 디버깅용 로그는 남겨두시면 좋습니다
+        print(f"DEBUG Error: {e}")
         raise HTTPException(401, "유효하지 않은 토큰")
-
-# async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-#     token = credentials.credentials
-#     # >>> 1. [임시] JWT Secret 로드 확인
-#     print(f"DEBUG: JWT Secret is set: {bool(supabase_jwt_secret)}") 
-    
-#     if not supabase_jwt_secret: raise HTTPException(500, "JWT 시크릿 설정 없음")
-#     try:
-#         payload = jwt.decode(token, supabase_jwt_secret, algorithms=["HS256"])
-#         user_id = payload.get("sub")
-#         # ... (생략)
-#         return user_id
-#     except jwt.ExpiredSignatureError: 
-#         # >>> 2. [임시] 만료 에러
-#         print("DEBUG: Token Expired")
-#         raise HTTPException(401, "토큰 만료")
-#     except (jwt.PyJWTError, Exception) as e: 
-#         # >>> 3. [임시] 다른 유효하지 않은 토큰 에러
-#         print(f"DEBUG: Invalid Token Error: {e}")
-#         # e의 상세 내용(예: Signature verification failed)이 콘솔에 출력됩니다.
-#         raise HTTPException(401, "유효하지 않은 토큰")
 
 # ====================================================
 # 유틸리티 함수
 # ====================================================
 async def fetch_paginated_data(base_query: Any) -> List[Dict[str, Any]]:
-    # (이전과 동일)
     all_data = []
     offset = 0
     while True:
@@ -166,7 +152,6 @@ async def fetch_paginated_data(base_query: Any) -> List[Dict[str, Any]]:
         except: break
     return all_data
 
-# (이하 process_competition_data, get_skill_level_from_grade 등 모든 유틸리티 함수는 이전과 동일하게 유지)
 def process_competition_data(item: Dict[str, Any], available_from: Optional[str] = None) -> Optional[Dict[str, Any]]:
     if available_from and item.get('event_period'):
         try:
@@ -250,7 +235,7 @@ def calculate_recommendation_score(user_profile: Dict[str, Any], competition: Di
 # ====================================================
 
 @app.get("/")
-def read_root(): return {"message": "Sports API is running!", "version": "2.2.0"}
+def read_root(): return {"message": "Sports API is running!", "version": "2.3.0"}
 
 @app.get("/competitions", response_model=Dict[str, Any])
 async def search_competitions(sport_category: Optional[SportCategory] = None, province: Optional[str] = None, city_county: Optional[str] = None, available_from: Optional[str] = None):
@@ -265,25 +250,19 @@ async def search_competitions(sport_category: Optional[SportCategory] = None, pr
         all_data = await fetch_paginated_data(query)
         processed = [p for item in all_data if (p := process_competition_data(item, available_from))]
         
-        # 🌟 [수정 로직 시작] title 중복 제거 및 첫 번째 등장 행 유지 🌟
         seen_titles = set()
         unique_competitions = []
         
         for item in processed:
             title = item.get('title')
-            
-            # title이 있고, 이전에 처리된 적이 없는 경우에만 리스트에 추가
             if title and title not in seen_titles:
                 seen_titles.add(title)
                 unique_competitions.append(item)
         
-        # 'count'와 'data'에 중복이 제거된 고유 대회 목록을 사용
         return {"success": True, "count": len(unique_competitions), "data": unique_competitions}
-        # 🌟 [수정 로직 끝] 🌟
 
     except Exception as e: raise HTTPException(500, f"대회 검색 오류: {e}")
 
-# ✅ [복원] 공공 체육 프로그램 검색 엔드포인트
 @app.get("/public-programs", response_model=Dict[str, Any])
 async def search_public_programs(sport_category: Optional[str] = None, province: Optional[str] = None, city_county: Optional[str] = None):
     if not supabase: raise HTTPException(503, "Supabase 연결 실패")
@@ -297,7 +276,6 @@ async def search_public_programs(sport_category: Optional[str] = None, province:
         return {"success": True, "count": len(results), "data": results}
     except Exception as e: raise HTTPException(500, f"공공 체육 프로그램 조회 오류: {e}")
 
-# ✅ [복원] 전국 체육 동호회 검색 엔드포인트
 @app.get("/clubs", response_model=Dict[str, Any])
 async def search_clubs(sport_category: Optional[str] = None, province: Optional[str] = None, city_county: Optional[str] = None):
     if not supabase: raise HTTPException(503, "Supabase 연결 실패")
@@ -326,11 +304,22 @@ async def get_team_board_posts(sport_category: Optional[str] = None, recruitment
 async def get_team_board_detail(board_id: int):
     if not supabase: raise HTTPException(503, "Supabase 연결 실패")
     try:
-        post_res = supabase.table("team_board").select("*, profiles(nickname)").eq("id", board_id).single().execute()
+        # profiles 조인을 제거하고 user_id를 직접 선택
+        post_res = supabase.table("team_board").select("*, user_id").eq("id", board_id).single().execute()
         if not post_res.data: raise HTTPException(404, "게시글을 찾을 수 없습니다.")
+        
+        # 조회수 업데이트는 그대로 유지
         new_views = (post_res.data.get("views_count") or 0) + 1
         supabase.table("team_board").update({"views_count": new_views}).eq("id", board_id).execute()
         post_res.data['views_count'] = new_views
+        
+        # 클라이언트에서 작성자 닉네임을 사용하기 위해 profiles 테이블에서 닉네임을 별도로 조회
+        author_profile_res = supabase.table("profiles").select("nickname").eq("id", post_res.data['user_id']).single().execute()
+        if author_profile_res.data:
+            post_res.data['profiles'] = {'nickname': author_profile_res.data['nickname']}
+        else:
+            post_res.data['profiles'] = {'nickname': '익명'}
+            
         return {"success": True, "data": post_res.data}
     except Exception as e: raise HTTPException(500, f"게시글 상세 조회 실패: {e}")
 
@@ -351,10 +340,43 @@ async def create_team_board_post(post: TeamBoardCreate, current_user_id: str = D
     try:
         supabase_authed = get_authed_supabase_client(authorization.credentials)
         data = post.dict()
-        data['author_id'] = current_user_id
+        data['user_id'] = current_user_id
         response = supabase_authed.table("team_board").insert(data).execute()
         return {"success": True, "message": "게시글이 등록되었습니다.", "data": response.data[0]}
     except Exception as e: raise HTTPException(500, f"게시글 작성 오류: {e}")
+
+@app.put("/team-board/{board_id}", response_model=Dict[str, Any])
+async def update_team_board_post(board_id: int, post_update: TeamBoardUpdate, current_user_id: str = Depends(get_current_user_id), authorization: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        supabase_authed = get_authed_supabase_client(authorization.credentials)
+        
+        # 1. 게시글 조회 및 작성자 확인
+        post_res = supabase_authed.table("team_board").select("user_id").eq("id", board_id).single().execute()
+        if not post_res.data: raise HTTPException(404, "게시글 없음")
+        if post_res.data['user_id'] != current_user_id: raise HTTPException(403, "수정 권한 없음")
+
+        # 2. 데이터 업데이트
+        update_data = post_update.dict(exclude_unset=True)
+        if not update_data: raise HTTPException(400, "수정할 내용 없음")
+        
+        response = supabase_authed.table("team_board").update(update_data).eq("id", board_id).execute()
+        return {"success": True, "message": "게시글이 수정되었습니다.", "data": response.data[0]}
+    except Exception as e: raise HTTPException(500, f"게시글 수정 오류: {e}")
+
+@app.delete("/team-board/{board_id}", response_model=Dict[str, Any])
+async def delete_team_board_post(board_id: int, current_user_id: str = Depends(get_current_user_id), authorization: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        supabase_authed = get_authed_supabase_client(authorization.credentials)
+        
+        # 1. 게시글 조회 및 작성자 확인
+        post_res = supabase_authed.table("team_board").select("user_id").eq("id", board_id).single().execute()
+        if not post_res.data: raise HTTPException(404, "게시글 없음")
+        if post_res.data['user_id'] != current_user_id: raise HTTPException(403, "삭제 권한 없음")
+
+        # 2. 데이터 삭제 (is_active를 False로)
+        response = supabase_authed.table("team_board").update({"is_active": False}).eq("id", board_id).execute()
+        return {"success": True, "message": "게시글이 삭제되었습니다."}
+    except Exception as e: raise HTTPException(500, f"게시글 삭제 오류: {e}")
 
 @app.post("/team-board/{board_id}/replies", response_model=Dict[str, Any])
 async def create_reply(board_id: int, reply: ReplyCreate, current_user_id: str = Depends(get_current_user_id), authorization: HTTPAuthorizationCredentials = Depends(security)):
@@ -368,8 +390,6 @@ async def create_reply(board_id: int, reply: ReplyCreate, current_user_id: str =
     except Exception as e: raise HTTPException(500, f"댓글 작성 오류: {e}")
 
 async def get_user_profile(user_id: str, supabase_authed: Client) -> Dict[str, Any]:
-    # profile_res = supabase_authed.table("profiles").select("*, interesting_sports(*)").eq("id", user_id).single().execute()
-    # .maybe_single()을 사용하면 데이터가 없어도 에러가 나지 않고 None을 반환합니다.
     profile_res = supabase_authed.table("profiles").select("*, interesting_sports(*)").eq("id", user_id).maybe_single().execute()
     if not profile_res.data: raise HTTPException(404, "사용자 프로필을 찾을 수 없습니다.")
     user_profile = profile_res.data
@@ -391,7 +411,6 @@ async def recommend_competitions(current_user_id: str = Depends(get_current_user
         if not user_sports_map: return {"success": True, "count": 0, "message": "관심 종목 없음"}
         all_competitions = await fetch_paginated_data(supabase.table("competitions").select("*"))
         
-        # 1. 모든 대회를 순회하며 점수 계산 및 종목별로 그룹화
         scored_competitions_by_sport: Dict[str, List[Dict[str, Any]]] = {s: [] for s in user_sports_map}
         available_from = datetime.date.today().isoformat()
         for comp in all_competitions:
@@ -402,7 +421,6 @@ async def recommend_competitions(current_user_id: str = Depends(get_current_user
                 proc_comp.update({'recommendation_score': score, 'skill_similarity': skill_s, 'location_similarity': loc_s})
                 scored_competitions_by_sport[proc_comp["sport_category"]].append(proc_comp)
 
-        # 🌟 [수정 로직 시작] title 중복 제거 및 최고 점수 항목 유지 🌟
         unique_scored_competitions = {} 
         
         for sport, scored_list in scored_competitions_by_sport.items():
@@ -411,16 +429,11 @@ async def recommend_competitions(current_user_id: str = Depends(get_current_user
                 title = comp.get('title')
                 score = comp.get('recommendation_score', 0.0)
                 
-                # 해당 title이 처음 등장하거나, 현재 점수가 기존 최고 점수보다 높으면 업데이트
                 if title and (title not in best_by_title or score > best_by_title[title]['recommendation_score']):
                     best_by_title[title] = comp
             
-            # 종목별로 중복이 제거된 리스트를 다시 할당
             unique_scored_competitions[sport] = list(best_by_title.values())
 
-        # 🌟 [수정 로직 끝] 🌟
-        
-        # 2. 중복이 제거된 리스트를 점수 순으로 정렬하고 top_n을 선택
         final_recs = {
             s: sorted(c, key=lambda x: x['recommendation_score'], reverse=True)[:top_n] 
             for s, c in unique_scored_competitions.items()

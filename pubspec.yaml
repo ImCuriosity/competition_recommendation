@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_localizations: # ✅ 한글 입력을 위한 패키지 추가
-    sdk: flutter         # ✅ 한글 입력을 위한 패키지 추가
+    sdk: flutter         # ✅ 한글 입력을 위한 패-지 추가
 
   flutter_dotenv: ^5.1.0
   http: ^1.1.0
@@ -30,3 +30,5 @@ flutter:
   uses-material-design: true
   assets:
     - .env
+    - assets/home_logo.png
+    - assets/main_logo.png
