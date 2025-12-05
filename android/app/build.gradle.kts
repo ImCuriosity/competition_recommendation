@@ -2,7 +2,7 @@ import java.io.FileInputStream
 import java.util.Properties
 
 // ---------------------------------------------------------------------
-// 💡 1. API Key 로딩 로직 (Kotlin DSL) - 파일 최상단에서 한 번만 실행
+// 💡 1. API Key 로딩 (local.properties)
 // ---------------------------------------------------------------------
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
@@ -12,15 +12,24 @@ if (localPropertiesFile.exists()) {
         localProperties.load(inputStream)
     }
 }
-// 💡 [수정] local.properties 파일에서 "google.mapsApiKey" 값을 읽어오도록 변경합니다.
 val mapApiKey: String? = localProperties.getProperty("google.mapsApiKey")
 
 // ---------------------------------------------------------------------
+// 💡 2. [추가됨] 앱 서명 키 로딩 (key.properties)
+// ---------------------------------------------------------------------
+val keystoreProperties = Properties()
+// key.properties 파일이 android 폴더 바로 아래에 있어야 합니다.
+val keystorePropertiesFile = rootProject.file("key.properties")
+
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { inputStream ->
+        keystoreProperties.load(inputStream)
+    }
+}
 
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -40,22 +49,33 @@ android {
 
     defaultConfig {
         applicationId = "com.example.sports_app1"
-
-        // 지도 SDK 요구사항에 따라 minSdkVersion 21 이상 확인
         minSdk = flutter.minSdkVersion
-
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // 💡 2. Manifest Placeholders 설정 (읽어온 API 키 값을 Manifest에 주입)
-        // Manifest가 요구하는 "MAP_API_KEY" 변수에, local.properties에서 읽어온 실제 키를 주입합니다.
+        // Manifest에 API 키 주입
         manifestPlaceholders["MAP_API_KEY"] = mapApiKey ?: ""
+    }
+
+    // 💡 3. [추가됨] 서명 설정 (Signing Configs)
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties.getProperty("keyAlias")
+            keyPassword = keystoreProperties.getProperty("keyPassword")
+            storeFile = keystoreProperties.getProperty("storeFile")?.let { file(it) }
+            storePassword = keystoreProperties.getProperty("storePassword")
+        }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            // 💡 4. [수정됨] 위에서 만든 "release" 서명 설정을 적용
+            signingConfig = signingConfigs.getByName("release")
+
+            // 코드 난독화/축소 설정 (기본값 false, 필요시 true 변경)
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
@@ -67,7 +87,5 @@ flutter {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.10.0")
-
-    // 💡 Google Maps SDK 종속성 (버전 최신화 권장: 18.2.0 유지)
     implementation("com.google.android.gms:play-services-maps:18.2.0")
 }

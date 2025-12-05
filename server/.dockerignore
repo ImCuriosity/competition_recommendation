@@ -1,0 +1,10 @@
+# .dockerignore
+.git
+.gitignore
+.env
+.venv
+test.py
+test_disney.py
+loading.txt
+__pycache__
+*.pyc

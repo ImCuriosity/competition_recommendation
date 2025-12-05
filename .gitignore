@@ -47,3 +47,10 @@ app.*.map.json
 /android/app/release
 
 local.properties
+key.properties
+
+/linux
+/macos
+/windows
+
+pubspec.lock

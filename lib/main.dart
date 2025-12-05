@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart'; // ✅ 한글 입력을 위한 import
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -7,13 +8,16 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:sports_app1/login_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:sports_app1/profile_screen.dart';
+
+import 'package:sports_app1/public_sport_programs_screen.dart';
+import 'package:sports_app1/sport_clubs_screen.dart';
+import 'package:sports_app1/team_board_screen.dart';
 
 // ----------------------------------------------------
-// 대회 데이터 모델
+// Data Models & Constants
 // ----------------------------------------------------
-
-//우리 1등임
-
 
 class Competition {
   final String id;
@@ -21,8 +25,11 @@ class Competition {
   final LatLng latLng;
   final String category;
   final String location;
+  final String locationName;
   final String startDate;
   final String registerUrl;
+  final String registrationStartDate;
+  final String registerDeadline;
 
   Competition({
     required this.id,
@@ -30,28 +37,46 @@ class Competition {
     required this.latLng,
     required this.category,
     required this.location,
+    required this.locationName,
     required this.startDate,
     required this.registerUrl,
+    required this.registrationStartDate,
+    required this.registerDeadline,
   });
 
   factory Competition.fromJson(Map<String, dynamic> json) {
-    // 💡 Null 안전성 강화: 'as' 캐스팅 대신 안전한 접근 및 기본값 제공
-    // Null이 String으로 캐스팅되는 오류를 방지합니다.
-
-    // id는 null이 아니라고 가정하고 toString() 사용
     final String competitionId = json['id']?.toString() ?? 'unknown_id';
-
-    // 필수 필드에 Null이 들어왔을 경우 대체 값 지정
-    final String competitionName = (json['name'] as String?) ?? '제목 없음';
+    final String competitionName = (json['title'] as String?) ?? '제목 없음';
     final String competitionCategory = (json['sport_category'] as String?) ?? '기타';
-    final String competitionLocation = (json['location_city_county'] as String?) ?? '지역 정보 없음';
     final String competitionStartDate = (json['start_date'] as String?) ?? '미정';
-    final String competitionRegisterUrl = (json['register_url'] as String?) ?? '';
+    final String competitionRegisterUrl = (json['homepage_url'] as String?) ?? '';
+    final String competitionLocationName = (json['location_name'] as String?) ?? '장소 정보 없음';
+    final String provinceCity = (json['location_province_city'] as String?) ?? '';
+    final String countyDistrict = (json['location_county_district'] as String?) ?? '';
+    final String competitionLocation = '$provinceCity $countyDistrict'.trim();
 
-    // 좌표는 필수이며, Null일 경우 기본값 (0.0) 할당
+    String registrationPeriodString = (json['registration_period'] as String?) ?? '미정';
+    String registrationStartDate = '미정';
+    String registerDeadline = '미정';
+
+    if (registrationPeriodString != '미정' && registrationPeriodString.contains(',')) {
+      try {
+        final parts = registrationPeriodString.replaceAll('[', '').replaceAll(')', '').split(',');
+        if (parts.length == 2) {
+          final startStr = parts[0].trim();
+          final endStr = parts[1].trim();
+          registrationStartDate = startStr;
+          final DateTime endDate = DateTime.parse(endStr);
+          final DateTime deadlineDate = endDate.subtract(const Duration(days: 1));
+          registerDeadline = DateFormat('yyyy-MM-dd').format(deadlineDate);
+        }
+      } catch (e) {
+        // Parsing error
+      }
+    }
+
     final double lat = (json['latitude'] as double?) ?? 0.0;
     final double lng = (json['longitude'] as double?) ?? 0.0;
-
     final LatLng competitionLatLng = LatLng(lat, lng);
 
     return Competition(
@@ -60,106 +85,69 @@ class Competition {
       latLng: competitionLatLng,
       category: competitionCategory,
       location: competitionLocation,
+      locationName: competitionLocationName,
       startDate: competitionStartDate,
       registerUrl: competitionRegisterUrl,
+      registrationStartDate: registrationStartDate,
+      registerDeadline: registerDeadline,
     );
   }
 }
 
-// ----------------------------------------------------
-// 상수 및 초기 설정
-// ----------------------------------------------------
-
-// 백엔드 API 기본 URL (FastAPI의 기본 포트를 8000에서 8080으로 변경했습니다.)
-const String kBaseUrl = "http://10.0.2.2:8080";
-
-// 드롭다운 선택지 (백엔드와 일치하도록 설정)
+const String kBaseUrl = "https://sports-api-254427467650.asia-northeast3.run.app";
 const List<String> kSportCategories = ['전체 종목', '배드민턴', '마라톤', '보디빌딩', '테니스'];
-
-// 1단계: 시/도 단위 선택지
-const List<String> kProvinces = [
-  '전체 지역',
-  '서울특별시',
-  '부산광역시',
-  '대구광역시',
-  '인천광역시',
-  '광주광역시',
-  '대전광역시',
-  '울산광역시',
-  '세종특별자치시',
-  '경기도',
-  '강원특별자치도',
-  '충청북도',
-  '충청남도',
-  '전북특별자치도',
-  '전라남도',
-  '경상북도',
-  '경상남도',
-  '제주특별자치도'
-];
-
-// 2단계: 시/도에 따른 시/군/구 매핑 데이터
+const List<String> kProvinces = ['전체 지역', '서울특별시', '부산광역시', '대구광역시', '인천광역시', '광주광역시', '대전광역시', '울산광역시', '세종특별자치시', '경기도', '강원특별자치도', '충청북도', '충청남도', '전북특별자치도', '전라남도', '경상북도', '경상남도', '제주특별자치도'];
 const Map<String, List<String>> kCityCountyMap = {
   '전체 지역': ['전체 시/군/구'],
-  // 1. 특별시
   '서울특별시': ['전체 시/군/구', '종로구', '중구', '용산구', '성동구', '광진구', '동대문구', '중랑구', '성북구', '강북구', '도봉구', '노원구', '은평구', '서대문구', '마포구', '양천구', '강서구', '구로구', '금천구', '영등포구', '동작구', '관악구', '서초구', '강남구', '송파구', '강동구'],
-  // 2. 광역시
   '부산광역시': ['전체 시/군/구', '중구', '서구', '동구', '영도구', '부산진구', '동래구', '남구', '북구', '해운대구', '사하구', '금정구', '강서구', '연제구', '수영구', '사상구', '기장군'],
   '대구광역시': ['전체 시/군/구', '중구', '동구', '서구', '남구', '북구', '수성구', '달서구', '달성군', '군위군'],
   '인천광역시': ['전체 시/군/구', '중구', '동구', '미추홀구', '연수구', '남동구', '부평구', '계양구', '서구', '강화군', '옹진군'],
   '광주광역시': ['전체 시/군/구', '동구', '서구', '남구', '북구', '광산구'],
   '대전광역시': ['전체 시/군/구', '동구', '중구', '서구', '유성구', '대덕구'],
   '울산광역시': ['전체 시/군/구', '중구', '남구', '동구', '북구', '울주군'],
-  // 3. 특별자치시
   '세종특별자치시': ['전체 시/군/구', '세종특별자치시'],
-  // 4. 경기도
   '경기도': ['전체 시/군/구', '수원시', '성남시', '의정부시', '안양시', '부천시', '광명시', '평택시', '동두천시', '안산시', '고양시', '과천시', '구리시', '남양주시', '오산시', '시흥시', '군포시', '의왕시', '하남시', '용인시', '파주시', '이천시', '안성시', '김포시', '화성시', '광주시', '양주시', '포천시', '여주시', '연천군', '가평군', '양평군'],
-  // 5. 강원특별자치도
   '강원특별자치도': ['전체 시/군/구', '춘천시', '원주시', '강릉시', '동해시', '태백시', '속초시', '삼척시', '홍천군', '횡성군', '영월군', '평창군', '정선군', '철원군', '화천군', '양구군', '인제군', '고성군', '양양군'],
-  // 6. 충청북도
   '충청북도': ['전체 시/군/구', '청주시', '충주시', '제천시', '보은군', '옥천군', '영동군', '진천군', '괴산군', '음성군', '단양군', '증평군'],
-  // 7. 충청남도
   '충청남도': ['전체 시/군/구', '천안시', '공주시', '보령시', '아산시', '서산시', '논산시', '계룡시', '당진시', '금산군', '부여군', '서천군', '청양군', '홍성군', '예산군', '태안군'],
-  // 8. 전북특별자치도
   '전북특별자치도': ['전체 시/군/구', '전주시', '군산시', '익산시', '정읍시', '남원시', '김제시', '완주군', '진안군', '무주군', '장수군', '임실군', '순창군', '고창군', '부안군'],
-  // 9. 전라남도
   '전라남도': ['전체 시/군/구', '목포시', '여수시', '순천시', '나주시', '광양시', '담양군', '곡성군', '구례군', '고흥군', '보성군', '화순군', '장흥군', '강진군', '해남군', '영암군', '무안군', '함평군', '영광군', '장성군', '완도군', '진도군', '신안군'],
-  // 10. 경상북도
   '경상북도': ['전체 시/군/구', '포항시', '경주시', '김천시', '안동시', '구미시', '영주시', '영천시', '상주시', '문경시', '경산시', '의성군', '청송군', '영양군', '영덕군', '청도군', '고령군', '성주군', '칠곡군', '예천군', '봉화군', '울진군', '울릉군'],
-  // 11. 경상남도
   '경상남도': ['전체 시/군/구', '창원시', '진주시', '통영시', '사천시', '김해시', '밀양시', '거제시', '양산시', '의령군', '함안군', '창녕군', '고성군', '남해군', '하동군', '산청군', '함양군', '거창군', '합천군'],
-  // 12. 특별자치도
   '제주특별자치도': ['전체 시/군/구', '제주시', '서귀포시']
 };
+const LatLng kInitialCameraPosition = LatLng(37.5665, 126.9780);
 
-// 초기 지도 중심점 (Google Maps의 LatLng으로 교체)
-const LatLng kInitialCameraPosition = LatLng(37.5665, 126.9780); // 서울 시청
-
-
+// ✅ 마감 임박 임계값 상수 추가
+const int kDeadlineThresholdDays = 5;
 // ----------------------------------------------------
-// 메인 함수 및 앱 시작
+// App Entry Point
 // ----------------------------------------------------
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // 💡 .env 파일 로드
   try {
     await dotenv.load(fileName: ".env");
   } catch (e) {
-    print("⚠️ .env 파일 로드 실패: $e");
+    // .env file not found
   }
 
-  // 💡 .env에서 클라이언트 ID 가져오기
-  final String? clientId = dotenv.env['GOOGLE_MAPS_API_KEY'];
+  final supabaseUrl = dotenv.env['SUPABASE_URL'];
+  final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
 
-  // 지도 SDK 초기화 - Google Maps는 네이티브 파일에서 초기화하므로 Dart 코드는 간소화합니다.
-  if (clientId != null && clientId.isNotEmpty) {
-    print("Google Maps API 키 로드 완료. (네이티브 파일에서 키 확인 필요)");
+  if (supabaseUrl != null && supabaseAnonKey != null) {
+    try {
+      await Supabase.initialize(
+        url: supabaseUrl,
+        anonKey: supabaseAnonKey,
+      );
+    } catch (e) {
+      // Supabase init failed
+    }
   } else {
-    print("⚠️ GOOGLE_MAPS_API_KEY가 .env 파일에 설정되지 않았습니다. 지도는 작동하지 않을 수 있습니다.");
+    // Env vars missing
   }
-
   runApp(const MyApp());
 }
 
@@ -170,6 +158,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Sports Competition App',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,
         useMaterial3: true,
@@ -178,13 +167,76 @@ class MyApp extends StatelessWidget {
           foregroundColor: Colors.white,
         ),
       ),
+      // ✅ --- 한글 입력을 위한 로케일 설정 ---
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ko', 'KR'),
+        Locale('en', 'US'),
+      ],
+      locale: const Locale('ko', 'KR'),
+      // ✅ --- 설정 끝 ---
       home: const LoginScreen(),
     );
   }
 }
 
 // ----------------------------------------------------
-// 메인 화면 위젯 (지도 및 검색 기능)
+// Home Screen (Bottom Navigation)
+// ----------------------------------------------------
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _selectedIndex = 0;
+
+  static const List<Widget> _widgetOptions = <Widget>[
+    CompetitionMapScreen(),
+    PublicSportProgramsScreen(),
+    SportClubsScreen(),
+    TeamBoardScreen(),
+  ];
+
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: _widgetOptions,
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: '홈'),
+          BottomNavigationBarItem(icon: Icon(Icons.run_circle_outlined), label: '프로그램'),
+          BottomNavigationBarItem(icon: Icon(Icons.people_alt_outlined), label: '동호회'),
+          BottomNavigationBarItem(icon: Icon(Icons.group_add_outlined), label: '팀원 모집'),
+        ],
+        currentIndex: _selectedIndex,
+        selectedItemColor: Colors.blue,
+        unselectedItemColor: Colors.grey,
+        type: BottomNavigationBarType.fixed,
+        onTap: _onItemTapped,
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------
+// Competition Map Screen
 // ----------------------------------------------------
 
 class CompetitionMapScreen extends StatefulWidget {
@@ -195,44 +247,54 @@ class CompetitionMapScreen extends StatefulWidget {
 }
 
 class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
-  // GoogleMapController 사용
   GoogleMapController? _mapController;
   Set<Marker> _markers = {};
   List<Competition> _competitions = [];
   bool _isLoading = false;
-
-  // 검색 조건
   String _selectedCategory = kSportCategories.first;
-  // 1단계 시/도
   String _selectedProvince = kProvinces.first;
-  // 2단계 시/군/구
   String _selectedCityCounty = '전체 시/군/구';
   DateTime? _selectedDate;
-
-  // 백엔드에서 제공하는 사용자 위치 (예시)
   LatLng _userCurrentLocation = kInitialCameraPosition;
 
   @override
   void initState() {
     super.initState();
-    // _selectedCityCounty 초기값을 _selectedProvince의 리스트에서 가져와 불일치 방지
     _selectedCityCounty = kCityCountyMap[_selectedProvince]!.first;
     _determinePosition();
     _fetchCompetitions(isInitial: true);
   }
 
-  // ✅ 현재 위치를 가져오는 함수
-  Future<void> _determinePosition() async {
-    bool serviceEnabled;
-    LocationPermission permission;
+  Future<void> _logout() async {
+    setState(() => _isLoading = true);
+    try {
+      await Supabase.instance.client.auth.signOut();
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+              (Route<dynamic> route) => false,
+        );
+        _showSnackBar('로그아웃되었습니다.');
+      }
+    } catch (e) {
+      _showSnackBar('로그아웃 중 오류가 발생했습니다: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  void _editProfile() {
+    Navigator.push(context,
+        MaterialPageRoute(builder: (context) => const ProfileScreen()));
+  }
+
+  Future<void> _determinePosition() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       _showSnackBar('위치 서비스가 비활성화되어 있습니다.');
       return;
     }
-
-    permission = await Geolocator.checkPermission();
+    LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
@@ -240,196 +302,308 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
         return;
       }
     }
-
     if (permission == LocationPermission.deniedForever) {
-      _showSnackBar('위치 권한이 영구적으로 거부되었습니다. 앱 설정에서 권한을 허용해주세요.');
+      _showSnackBar('위치 권한이 영구적으로 거부되었습니다.');
       return;
     }
-
     try {
       Position position = await Geolocator.getCurrentPosition();
-      setState(() {
-        _userCurrentLocation = LatLng(position.latitude, position.longitude);
-      });
+      setState(() =>
+      _userCurrentLocation = LatLng(position.latitude, position.longitude));
       _moveCameraToCurrentUserLocation();
     } catch (e) {
-      _showSnackBar('현재 위치를 가져오는 데 실패했습니다: $e');
+      _showSnackBar('현재 위치를 가져오는데 실패했습니다.');
     }
   }
 
-  // ✅ 현재 위치로 카메라를 이동하는 함수
   void _moveCameraToCurrentUserLocation() {
-    if (_mapController != null) {
-      _mapController!.animateCamera(
-        CameraUpdate.newLatLngZoom(_userCurrentLocation, 14),
-      );
-    }
+    _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(_userCurrentLocation, 14));
   }
 
-
-  // 대회 데이터 로드 및 지도에 표시
   Future<void> _fetchCompetitions({bool isInitial = false}) async {
     setState(() {
       _isLoading = true;
+      if (isInitial) {
+        _selectedCategory = kSportCategories.first;
+        _selectedProvince = kProvinces.first;
+        _selectedCityCounty = kCityCountyMap[_selectedProvince]!.first;
+        _selectedDate = null;
+      }
     });
 
     final Map<String, dynamic> queryParams = {};
-
     if (!isInitial) {
-      if (_selectedCategory != '전체 종목') {
+      if (_selectedCategory != '전체 종목')
         queryParams['sport_category'] = _selectedCategory;
-      }
-
-      // 지역 필터링 로직: 백엔드에 시/도와 시/군/구를 분리하여 전송
       if (_selectedProvince != '전체 지역') {
         queryParams['province'] = _selectedProvince;
-
-        if (_selectedCityCounty != '전체 시/군/구') {
+        if (_selectedCityCounty != '전체 시/군/구')
           queryParams['city_county'] = _selectedCityCounty;
-        }
       }
-
-      if (_selectedDate != null) {
-        queryParams['available_from'] = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-      }
+      if (_selectedDate != null) queryParams['available_from'] =
+          DateFormat('yyyy-MM-dd').format(_selectedDate!);
     }
 
-    String queryString = Uri(queryParameters: queryParams.map((k, v) => MapEntry(k, v.toString()))).query;
-    final Uri uri = Uri.parse('$kBaseUrl/competitions?$queryString');
+    final uri = Uri.parse('$kBaseUrl/competitions').replace(
+        queryParameters: queryParams);
+    await _fetchDataAndUpdateMap(uri);
+  }
+
+  Future<void> _fetchAiRecommendations() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      _showSnackBar('AI 추천을 받으려면 로그인이 필요합니다.');
+      return;
+    }
+
+    // ✅ user_id 추출
+    final userId = session.user?.id;
+    if (userId == null) {
+      _showSnackBar('사용자 ID를 확인할 수 없습니다. 다시 로그인해 주세요.');
+      return;
+    }
+
+    // ✅ 1. 사용자로부터 추천 개수(topN) 입력받기
+    final int? topN = await _showTopNDialog(context);
+    if (topN == null || topN <= 0) {
+      _showSnackBar('유효한 추천 개수를 입력해야 합니다.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    // ✅ 2. 쿼리 파라미터에 top_n_per_sport 추가
+    final uri = Uri.parse('$kBaseUrl/recommend/competitions').replace(
+        queryParameters: {
+          'top_n': topN.toString(),
+          'user_id': userId, // ✅ user_id 추가
+        }
+    );
 
     try {
-      final response = await http.get(uri);
+      final response = await http.get(uri, headers: {
+        'Authorization': 'Bearer ${session.accessToken}',
+      });
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
+        if (data['success'] == true && data['recommended_by_sport'] != null) {
+          final Map<String,
+              dynamic> recommendationsBySport = data['recommended_by_sport'];
+          final List<Competition> recommendedComps = [];
 
+          recommendationsBySport.forEach((sport, competitions) {
+            final List<Competition> comps = (competitions as List)
+                .map((json) => Competition.fromJson(json))
+                .toList();
+            recommendedComps.addAll(comps);
+          });
+
+          _updateMarkersAndCamera(recommendedComps, isAiRecommendation: true);
+        } else {
+          _showSnackBar(data['message'] ?? '추천을 받아오지 못했습니다.');
+        }
+      } else {
+        // ✅ 오류 처리 로직 수정 시작
+        String errorMessage = 'API 오류: ${response.statusCode}';
+        try {
+          final errorData = json.decode(utf8.decode(response.bodyBytes));
+
+          // 'detail' 키가 문자열이면 바로 사용
+          if (errorData['detail'] is String) {
+            errorMessage = errorData['detail'];
+          }
+          // 'detail' 키가 리스트 형태면, 리스트의 내용을 문자열로 변환하여 표시
+          else if (errorData['detail'] is List) {
+            errorMessage =
+                (errorData['detail'] as List).map((e) => e.toString()).join(
+                    '\n');
+          }
+          // 다른 형태의 오류 메시지 키가 있는지 확인 (예: 'message')
+          else if (errorData['message'] is String) {
+            errorMessage = errorData['message'];
+          }
+        } catch (e) {
+          // JSON 파싱 자체에 실패하면 원본 오류 메시지를 사용
+          errorMessage = 'API 응답 파싱 실패: ${response.statusCode}';
+        }
+
+        _showSnackBar(errorMessage);
+      }
+    } catch (e) {
+      _showSnackBar('네트워크 오류: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _fetchDataAndUpdateMap(Uri uri) async {
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        final data = json.decode(utf8.decode(response.bodyBytes));
         if (data['success'] == true && data['data'] != null) {
           final List<Competition> newCompetitions = (data['data'] as List)
               .map((json) => Competition.fromJson(json))
-              .where((comp) => comp.latLng.latitude != 0.0 || comp.latLng.longitude != 0.0) // 좌표가 0.0, 0.0 인 데이터 제외
+              .where((c) => c.latLng.latitude != 0.0)
               .toList();
-
-          final int resultCount = newCompetitions.length; // 💡 검색된 실제 개수
-
-          setState(() {
-            _competitions = newCompetitions;
-            _updateMapMarkers();
-            _adjustMapBounds();
-          });
-
-          // 💡 [수정] 검색 결과 개수를 표시하는 스낵바 추가
-          if (resultCount > 0) {
-            _showSnackBar("✅ 검색 결과: ${resultCount}개의 대회가 발견되었습니다.");
-          } else {
-            _showSnackBar("검색 조건에 맞는 대회가 없습니다.");
-          }
-
+          _updateMarkersAndCamera(newCompetitions);
         } else {
-          setState(() {
-            _competitions = [];
-            _markers = {};
-            _adjustMapBounds();
-          });
-          // 성공은 했지만 데이터가 없거나 메시지 반환 시 (Null 안전성 강화 필요)
-          _showSnackBar(data['message']?.toString() ?? "검색 조건에 맞는 대회가 없습니다.");
+          _updateMarkersAndCamera([]);
+          _showSnackBar(data['message'] ?? "검색 결과가 없습니다.");
         }
       } else {
-        // HTTP 상태 코드 오류 시
         _showSnackBar("API 호출 실패: HTTP ${response.statusCode}");
       }
     } catch (e) {
-      // 💡 네트워크 오류 시 발생한 예외 객체를 안전하게 문자열로 변환하여 출력
-      _showSnackBar("네트워크 오류: API에 연결할 수 없습니다. ${e.toString()}");
+      _showSnackBar("네트워크 오류: ${e.toString()}");
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // 마커 업데이트 로직 (Google Maps용)
+  void _updateMarkersAndCamera(List<Competition> competitions,
+      {bool isAiRecommendation = false}) {
+    _competitions = competitions;
+    _updateMapMarkers();
+    _adjustMapBounds();
+
+    final message = isAiRecommendation
+        ? "✅ AI가 ${_competitions.length}개의 맞춤 대회를 추천했습니다."
+        : "✅ ${_competitions.length}개의 대회를 찾았습니다.";
+
+    if (_competitions.isNotEmpty) {
+      _showSnackBar(message);
+    }
+  }
+
+  // ✅ 마감 임박 마커 색상 결정 로직 추가
+  BitmapDescriptor _getMarkerColor(Competition comp) {
+    try {
+      final deadline = DateTime.parse(comp.registerDeadline);
+      final now = DateTime.now();
+      final difference = deadline.difference(now).inDays;
+
+      // 마감일이 현재 날짜보다 나중이면서 (아직 마감 전)
+      // 7일 이내라면 빨간색 마커 사용
+      if (difference >= 0 && difference <= kDeadlineThresholdDays) {
+        // 마감 임박 (빨간색)
+        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
+      }
+    } catch (e) {
+      // 날짜 파싱 오류 발생 시 기본값 사용
+    }
+
+    // 기본값 (주황색)
+    return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+  }
+
   void _updateMapMarkers() {
     final Set<Marker> newMarkers = {};
     for (var comp in _competitions) {
-      final marker = Marker(
+      newMarkers.add(Marker(
         markerId: MarkerId(comp.id),
         position: comp.latLng,
-        infoWindow: InfoWindow(
-          title: comp.name,
-          snippet: comp.location,
-          onTap: () => _showCompetitionDetails(comp),
-        ),
-      );
-      newMarkers.add(marker);
+        icon: _getMarkerColor(comp),
+        onTap: () => _showCompetitionDetails(comp),
+      ));
     }
-    setState(() {
-      _markers = newMarkers;
-    });
+    setState(() => _markers = newMarkers);
   }
 
-  // 검색 결과에 따라 지도 비율 변경 로직 (Google Maps용)
   void _adjustMapBounds() {
-    if (_mapController == null || _competitions.isEmpty) {
+    if (_mapController == null) return;
+
+    if (_competitions.isEmpty) {
+      _mapController!.animateCamera(
+          CameraUpdate.newLatLngZoom(kInitialCameraPosition, 12));
       return;
     }
 
     if (_competitions.length == 1) {
-      _mapController!.animateCamera(CameraUpdate.newLatLngZoom(
-        _competitions.first.latLng,
-        14,
-      ));
+      _mapController!.animateCamera(
+          CameraUpdate.newLatLngZoom(_competitions.first.latLng, 15));
       return;
     }
 
-    // 결과가 여러 개일 경우, 모든 마커를 포함하는 경계 계산
-    double minLat = _competitions.map((c) => c.latLng.latitude).reduce((a, b) => a < b ? a : b);
-    double maxLat = _competitions.map((c) => c.latLng.latitude).reduce((a, b) => a > b ? a : b);
-    double minLng = _competitions.map((c) => c.latLng.longitude).reduce((a, b) => a < b ? a : b);
-    double maxLng = _competitions.map((c) => c.latLng.longitude).reduce((a, b) => a > b ? a : b);
+    double minLat = _competitions.map((c) => c.latLng.latitude).reduce((a,
+        b) => a < b ? a : b);
+    double maxLat = _competitions.map((c) => c.latLng.latitude).reduce((a,
+        b) => a > b ? a : b);
+    double minLng = _competitions.map((c) => c.latLng.longitude).reduce((a,
+        b) => a < b ? a : b);
+    double maxLng = _competitions.map((c) => c.latLng.longitude).reduce((a,
+        b) => a > b ? a : b);
 
     final bounds = LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
-    );
-
-    // 경계에 맞게 지도 뷰 이동 (패딩 100)
-    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(
-      bounds,
-      100,
-    ));
+        southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng));
+    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 50));
   }
 
-  // 상세 정보 표시 모달
   void _showCompetitionDetails(Competition competition) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
         return SingleChildScrollView(
           child: Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(25, 30, 25, 40),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(competition.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                Text(competition.name, style: const TextStyle(fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black87)),
+                const Divider(height: 30),
+                const Text('📌 장소 정보', style: TextStyle(fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo)),
                 const SizedBox(height: 10),
-                Text('종목: ${competition.category}'),
-                Text('지역: ${competition.location}'),
-                Text('시작일: ${competition.startDate}'),
-                const SizedBox(height: 20),
+                _buildModalIconTextRow(Icons.place, '주소', competition.location),
+                _buildModalIconTextRow(
+                    Icons.pin_drop, '장소명', competition.locationName),
+                const SizedBox(height: 25),
+                const Text('⏱️ 대회 상세', style: TextStyle(fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo)),
+                const SizedBox(height: 10),
+                _buildModalIconTextRow(
+                    Icons.category, '종목', competition.category),
+                _buildModalIconTextRow(
+                    Icons.event_available, '대회 시작일', competition.startDate),
+                const SizedBox(height: 25),
+                const Text('📝 접수 기간', style: TextStyle(fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo)),
+                const SizedBox(height: 10),
+                _buildModalIconTextRow(Icons.schedule_send, '접수 시작일',
+                    competition.registrationStartDate),
+                _buildModalIconTextRow(
+                    Icons.date_range, '접수 마감일', competition.registerDeadline),
+                const SizedBox(height: 40),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('닫기'),
-                    ),
+                    TextButton(onPressed: () => Navigator.pop(context),
+                        child: const Text('닫기')),
                     const SizedBox(width: 10),
                     ElevatedButton.icon(
                       onPressed: () => _launchURL(competition.registerUrl),
-                      icon: const Icon(Icons.app_registration),
-                      label: const Text('등록하기'),
+                      icon: const Icon(Icons.link),
+                      label: const Text(
+                          '등록 사이트 이동', style: TextStyle(fontSize: 15)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.indigo,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 15, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
                     ),
                   ],
                 ),
@@ -441,209 +615,244 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
     );
   }
 
-  // URL 연결 및 스낵바 로직은 유지
+  Widget _buildModalIconTextRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: Colors.indigo),
+          const SizedBox(width: 15),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                const SizedBox(height: 2),
+                Text(value, style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _launchURL(String url) async {
-    final Uri uri = Uri.parse(url);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      _showSnackBar('등록 URL을 열 수 없습니다: $url');
+    if (!await launchUrl(
+        Uri.parse(url), mode: LaunchMode.externalApplication)) {
+      _showSnackBar('URL을 열 수 없습니다: $url');
     }
   }
 
   void _showSnackBar(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    }
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)));
   }
 
-  // 기간 선택 DatePicker 로직은 유지
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate ?? DateTime.now(),
-      firstDate: DateTime(2023),
-      lastDate: DateTime(2030),
-      helpText: '참가 가능 시작 날짜 선택',
-      cancelText: '취소',
-      confirmText: '확인',
+      firstDate: DateTime(2023), lastDate: DateTime(2030),
     );
-    if (picked != null && picked != _selectedDate) {
-      setState(() {
-        _selectedDate = picked;
-      });
-    }
+    if (picked != null && picked != _selectedDate) setState(() =>
+    _selectedDate = picked);
   }
 
-  // 드롭다운 위젯 빌더
-  Widget _buildDropdown(String label, String value, List<String> items, ValueChanged<String?> onChanged) {
+  Widget _buildDropdown(String label, String value, List<String> items,
+      ValueChanged<String?> onChanged) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 8.0),
-          child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        ),
+        Padding(padding: const EdgeInsets.only(left: 8.0),
+            child: Text(label,
+                style: const TextStyle(fontSize: 12, color: Colors.grey))),
         DropdownButton<String>(
-          value: value,
-          isExpanded: true,
-          onChanged: onChanged,
-          items: items.map<DropdownMenuItem<String>>((String item) {
-            return DropdownMenuItem<String>(
-              value: item,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 8.0),
-                child: Text(item, style: const TextStyle(fontSize: 14)),
-              ),
-            );
-          }).toList(),
+          value: value, isExpanded: true, onChanged: onChanged,
+          items: items
+              .map<DropdownMenuItem<String>>((String item) =>
+              DropdownMenuItem<String>(value: item,
+                  child: Padding(padding: const EdgeInsets.only(left: 8.0),
+                      child: Text(item, style: const TextStyle(fontSize: 14)))))
+              .toList(),
         ),
       ],
     );
   }
 
+  // ✅ 추천 개수 입력을 위한 다이얼로그 함수 추가
+  Future<int?> _showTopNDialog(BuildContext context) async {
+    String? input;
+    return showDialog<int>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('AI 추천 개수 입력'),
+          content: TextField(
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              hintText: '종목별 추천 개수를 입력하세요 (예: 3)',
+            ),
+            onChanged: (value) {
+              input = value;
+            },
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('취소'),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+            ),
+            TextButton(
+              child: const Text('확인'),
+              onPressed: () {
+                final int? topN = int.tryParse(input ?? '');
+                Navigator.of(dialogContext).pop(topN);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🏆 체육 대회 검색'),
+        leading: GestureDetector(
+          onTap: () => _fetchCompetitions(isInitial: true),
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Image.asset('assets/main_logo.png'),
+          ),
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('우리 동네 체육대회',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            if (Supabase.instance.client.auth.currentUser != null)
+              Text('Email: ${Supabase.instance.client.auth.currentUser!.email}',
+                  style: const TextStyle(fontSize: 10, color: Colors.white70)),
+          ],
+        ),
+        actions: [
+          IconButton(icon: const Icon(Icons.person),
+              tooltip: '프로필 수정',
+              onPressed: _isLoading ? null : _editProfile),
+          IconButton(icon: const Icon(Icons.logout),
+              tooltip: '로그아웃',
+              onPressed: _isLoading ? null : _logout),
+        ],
       ),
       body: Stack(
         children: [
-
-          // 1. GoogleMap 위젯
           GoogleMap(
             mapType: MapType.normal,
             initialCameraPosition: CameraPosition(
-              target: _userCurrentLocation,
-              zoom: 10,
-            ),
-            onMapCreated: (GoogleMapController controller) {
+                target: _userCurrentLocation, zoom: 10),
+            onMapCreated: (controller) {
               _mapController = controller;
               _moveCameraToCurrentUserLocation();
             },
             markers: _markers,
             myLocationEnabled: true,
-            padding: const EdgeInsets.only(top: 280),
+            padding: const EdgeInsets.only(top: 260),
           ),
-
-
-          // 로딩 인디케이터
-          if (_isLoading)
-            const Center(
-              child: CircularProgressIndicator(),
-            ),
-
-          // 2. 검색 조건 UI (상단)
+          if (_isLoading) const Center(child: CircularProgressIndicator()),
           Positioned(
-            top: 10,
-            left: 10,
-            right: 10,
+            top: 10, left: 10, right: 10,
             child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.95),
                 borderRadius: BorderRadius.circular(10),
-                boxShadow: const [BoxShadow(blurRadius: 5, color: Colors.black26)],
+                boxShadow: const [
+                  BoxShadow(blurRadius: 5, color: Colors.black26)
+                ],
               ),
               child: Column(
                 children: [
-                  // 1. 종목 & 기간 선택 Row
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      // 종목 드롭다운
-                      Expanded(
-                        child: _buildDropdown(
-                          '종목',
-                          _selectedCategory,
-                          kSportCategories,
-                              (newValue) {
-                            setState(() {
-                              _selectedCategory = newValue!;
-                            });
-                          },
-                        ),
-                      ),
-                      // 기간 선택 버튼
+                      Expanded(child: _buildDropdown(
+                          '종목', _selectedCategory, kSportCategories, (v) =>
+                          setState(() => _selectedCategory = v!))),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Padding(
-                              padding: EdgeInsets.only(left: 8.0),
-                              child: Text('기간', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                            ),
+                            const Padding(padding: EdgeInsets.only(left: 8.0),
+                                child: Text('기간', style: TextStyle(
+                                    fontSize: 12, color: Colors.grey))),
                             TextButton.icon(
                               onPressed: () => _selectDate(context),
                               icon: const Icon(Icons.calendar_today, size: 16),
                               label: Text(
-                                _selectedDate == null
-                                    ? '날짜 선택'
-                                    : DateFormat('yy/MM/dd').format(_selectedDate!),
-                                style: const TextStyle(fontSize: 14),
-                              ),
+                                  _selectedDate == null ? '날짜 선택' : DateFormat(
+                                      'yy/MM/dd').format(_selectedDate!),
+                                  style: const TextStyle(fontSize: 14)),
                               style: TextButton.styleFrom(
-                                padding: EdgeInsets.zero,
-                                alignment: Alignment.centerLeft,
-                              ),
+                                  padding: EdgeInsets.zero,
+                                  alignment: Alignment.centerLeft),
                             ),
                           ],
                         ),
                       ),
                     ],
                   ),
-
-                  // 2. 지역 드롭다운 Row
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      // 1단계: 시/도 선택 (Expanded 적용)
-                      Expanded(
-                        child: _buildDropdown(
-                          '시/도',
-                          _selectedProvince,
-                          kProvinces,
-                              (newValue) {
-                            setState(() {
-                              _selectedProvince = newValue!;
-                              // 시/도가 바뀌면 시/군/구 목록을 해당 시/도로 초기화
-                              _selectedCityCounty = kCityCountyMap[newValue]!.first;
-                            });
-                          },
-                        ),
-                      ),
-                      // 2단계: 시/군/구 선택 (Expanded 적용)
-                      Expanded(
-                        child: _buildDropdown(
-                          '시/군/구',
-                          _selectedCityCounty,
-                          // 현재 선택된 시/도에 해당하는 시/군/구 목록을 사용
-                          kCityCountyMap[_selectedProvince]!,
-                              (newValue) {
-                            setState(() {
-                              _selectedCityCounty = newValue!;
-                            });
-                          },
-                        ),
-                      ),
+                      Expanded(child: _buildDropdown(
+                          '시/도', _selectedProvince, kProvinces, (v) =>
+                          setState(() {
+                            _selectedProvince = v!;
+                            _selectedCityCounty = kCityCountyMap[v]!.first;
+                          }))),
+                      Expanded(child: _buildDropdown(
+                          '시/군/구', _selectedCityCounty,
+                          kCityCountyMap[_selectedProvince]!, (v) =>
+                          setState(() => _selectedCityCounty = v!))),
                     ],
                   ),
-
                   const SizedBox(height: 10),
-                  // 3. 검색 버튼
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: _isLoading
-                          ? null
-                          : () => _fetchCompetitions(isInitial: false),
+                      onPressed: _isLoading ? null : () =>
+                          _fetchCompetitions(isInitial: false),
                       icon: const Icon(Icons.search),
-                      label: const Text('대회 검색', style: TextStyle(fontSize: 16)),
+                      label: const Text(
+                          '대회 검색', style: TextStyle(fontSize: 16)),
                       style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _isLoading ? null : _fetchAiRecommendations,
+                      icon: const Icon(Icons.smart_toy_outlined, size: 20),
+                      label: const Text('AI 맞춤 대회 추천 받기', style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFEE135),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        elevation: 3,
                       ),
                     ),
                   ),
@@ -651,60 +860,61 @@ class _CompetitionMapScreenState extends State<CompetitionMapScreen> {
               ),
             ),
           ),
-
-          // 3. 하단 AI 추천 / 지도자 매칭 버튼 영역
           Positioned(
-            bottom: 20,
-            left: 10,
-            right: 10,
-            child: Row(
-              children: [
-                // AI 추천 버튼
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: ElevatedButton(
-                      onPressed: () {
-                        _showSnackBar('AI 추천 기능 준비 중입니다.');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Colors.grey),
-                        ),
-                      ),
-                      child: const Text('AI 추천', style: TextStyle(fontSize: 16)),
-                    ),
-                  ),
-                ),
-
-                // 지도자 매칭 버튼
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 8.0),
-                    child: ElevatedButton(
-                      onPressed: () {
-                        _showSnackBar('지도자 매칭 페이지로 이동합니다.');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Colors.grey),
-                        ),
-                      ),
-                      child: const Text('지도자 매칭', style: TextStyle(fontSize: 16)),
-                    ),
-                  ),
-                ),
-              ],
+            bottom: 17,
+            left: 210,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300)
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('마커 범례', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  SizedBox(height: 5),
+                  // 빨간색 마커 설명
+                  _LegendItem(color: Colors.red, text: '마감 임박 (5일 이내)'),
+                  // 노란색 마커 설명
+                  _LegendItem(color: Colors.orange, text: '일반 대회'),
+                ],
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ✅ 범례 항목을 위한 보조 위젯 (CompetitionMapScreenState 클래스 외부에 추가)
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final String text;
+
+  const _LegendItem({required this.color, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Row(
+        children: [
+          // 작은 색상 박스로 색상 표시
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.black, width: 0.5),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(text, style: const TextStyle(fontSize: 12)),
+
         ],
       ),
     );
